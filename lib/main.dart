@@ -12,6 +12,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 // ==========================================
 // 主题状态管理
@@ -36,6 +38,182 @@ class ThemeProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_dark_mode', isDark);
     notifyListeners();
+  }
+}
+
+// ==========================================
+// 句段翻译与小作文界面 + OCR 唤起
+// ==========================================
+class TranslationEssayScreen extends StatefulWidget {
+  final String? initialText;
+  const TranslationEssayScreen({super.key, this.initialText});
+
+  @override
+  State<TranslationEssayScreen> createState() => _TranslationEssayScreenState();
+}
+
+class _TranslationEssayScreenState extends State<TranslationEssayScreen> {
+  late TextEditingController _textController;
+  bool _isEssayMode = false;
+  bool _isProcessing = false;
+  String _aiResult = "";
+
+  @override
+  void initState() {
+    super.initState();
+    _textController = TextEditingController(text: widget.initialText ?? "");
+  }
+
+  // 拍照 OCR 核心逻辑
+  Future<void> _pickAndRecognize(ImageSource source) async {
+    // 【新增】多端平台拦截：仅限手机端运行 ML Kit
+    if (kIsWeb || !(io.Platform.isAndroid || io.Platform.isIOS)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("提示：本地 OCR 识别模块目前仅支持安装在 Android/iOS 手机端运行。"))
+      );
+      return;
+    }
+
+    final pickedFile = await ImagePicker().pickImage(source: source);
+    if (pickedFile == null) return;
+    
+    setState(() => _isProcessing = true);
+    try {
+      final inputImage = InputImage.fromFilePath(pickedFile.path);
+      // 使用中文脚本识别器，完美兼容中英混合
+      final textRecognizer = TextRecognizer(script: TextRecognitionScript.chinese);
+      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
+      
+      setState(() {
+        // 将识别到的文字追加到输入框中
+        _textController.text = _textController.text + recognizedText.text;
+      });
+      await textRecognizer.close();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("OCR 识别失败: $e")));
+    } finally {
+      setState(() => _isProcessing = false);
+    }
+  }
+
+  // 提交给 DeepSeek 分析
+  Future<void> _submitToAi() async {
+    if (_textController.text.trim().isEmpty) return;
+    setState(() => _isProcessing = true);
+    
+    final result = await AiService.analyzeText(_textController.text, _isEssayMode);
+    
+    setState(() {
+      _aiResult = result;
+      _isProcessing = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("读写特训营"),
+        actions: [
+          Row(
+            children:[
+              const Text("句段翻译"),
+              Switch(
+                value: _isEssayMode,
+                activeColor: Colors.orange,
+                onChanged: (val) => setState(() => _isEssayMode = val),
+              ),
+              const Text("作文批改  "),
+            ],
+          )
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children:[
+            // 文本输入区
+            TextField(
+              controller: _textController,
+              maxLines: 6,
+              decoration: InputDecoration(
+                hintText: _isEssayMode ? "请在此输入或拍照导入你的四六级英语作文..." : "请在此输入需要翻译的中文或英文长难句...",
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            
+            // 操作按钮区
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children:[
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.camera_alt),
+                  label: const Text("拍照识字"),
+                  onPressed: () => _pickAndRecognize(ImageSource.camera),
+                ),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.photo_library),
+                  label: const Text("相册导入"),
+                  onPressed: () => _pickAndRecognize(ImageSource.gallery),
+                ),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.auto_awesome),
+                  label: Text(_isEssayMode ? "AI 批改作文" : "AI 翻译"),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
+                  onPressed: _isProcessing ? null : _submitToAi,
+                ),
+              ],
+            ),
+            const Divider(height: 30),
+            
+            // AI 结果展示区
+            Expanded(
+              child: _isProcessing 
+                ? const Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    child: SelectableText(
+                      _aiResult.isEmpty ? "AI 诊断结果将显示在这里..." : _aiResult,
+                      style: const TextStyle(fontSize: 16, height: 1.5),
+                    ),
+                  ),
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 全新主导航页 (底部导航栏)
+// ==========================================
+class MainTabScreen extends StatefulWidget {
+  const MainTabScreen({super.key});
+  @override
+  State<MainTabScreen> createState() => _MainTabScreenState();
+}
+
+class _MainTabScreenState extends State<MainTabScreen> {
+  int _currentIndex = 0;
+  final List<Widget> _pages =[
+    const HomeScreen(),          // Tab 0: 原来的背单词页面
+    const TranslationEssayScreen(), // Tab 1: 翻译与作文
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _pages[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) => setState(() => _currentIndex = index),
+        items: const[
+          BottomNavigationBarItem(icon: Icon(Icons.style), label: "背单词"),
+          BottomNavigationBarItem(icon: Icon(Icons.edit_document), label: "翻译与作文"),
+        ],
+      ),
+    );
   }
 }
 
@@ -80,7 +258,7 @@ class CetLearningApp extends StatelessWidget {
         useMaterial3: true,
       ),
       themeMode: themeProvider.themeMode,
-      home: const HomeScreen(),
+      home: const MainTabScreen(),
     );
   }
 }
@@ -119,16 +297,29 @@ class Word {
   );
 
   void updateSM2(int quality) {
-    if (quality < 3) { reps = 0; interval = 1; }
-    else {
+    if (quality < 3) { 
+      reps = 0; 
+      interval = 1; 
+    } else {
       if (reps == 0) interval = 1;
       else if (reps == 1) interval = 6;
       else interval = (interval * easeFactor).round();
       reps++;
     }
+    
+    // 动态调整权重：选错扣除权重，连续正确增加权重
     easeFactor = easeFactor + (0.1 - (5 - quality) * (0.08 + (5 - quality) * 0.02));
-    if (easeFactor < 1.3) easeFactor = 1.3;
-    nextReviewDate = DateTime.now().add(Duration(days: interval)).millisecondsSinceEpoch;
+    
+    // 【修改】权重阈值控制 (值越小复习越频繁)
+    if (easeFactor < 1.3) easeFactor = 1.3; // 下限
+    if (easeFactor > 3.0) easeFactor = 3.0; // 上限阈值
+    
+    // 【新增】如果本次全对(quality>=4)，且历史连续正确超过3次，标记为已彻底掌握 (-1)
+    if (quality >= 4 && reps >= 3) {
+      nextReviewDate = -1; 
+    } else {
+      nextReviewDate = DateTime.now().add(Duration(days: interval)).millisecondsSinceEpoch;
+    }
   }
 }
 
@@ -238,9 +429,21 @@ class DatabaseHelper {
   static Future<List<Word>> getTodayWords() async {
     final db = await database;
     int now = DateTime.now().millisecondsSinceEpoch;
-    final maps = await db.rawQuery(
-      'SELECT * FROM words WHERE nextReviewDate IS NULL OR nextReviewDate = 0 OR nextReviewDate <= ? LIMIT 20', [now]);
-    return List.generate(maps.length, (i) => Word.fromMap(maps[i]));
+    
+    // 1. 获取所有到期需要复习的旧词 (排除标记为 -1 已掌握的单词)
+    final List<Map<String, dynamic>> dueMaps = await db.rawQuery(
+      'SELECT * FROM words WHERE nextReviewDate > 0 AND nextReviewDate <= ? AND nextReviewDate != -1', 
+      [now]
+    );
+    List<Word> words = dueMaps.map((map) => Word.fromMap(map)).toList();
+
+    // 2. 随机抽取 20 个全新词汇 (保证乱序，完全随机)
+    final List<Map<String, dynamic>> newMaps = await db.rawQuery(
+      'SELECT * FROM words WHERE nextReviewDate IS NULL OR nextReviewDate = 0 ORDER BY RANDOM() LIMIT 20'
+    );
+    words.addAll(newMaps.map((map) => Word.fromMap(map)));
+    
+    return words;
   }
 
   static Future<bool> forceReimportDatabase() async {
@@ -473,6 +676,34 @@ class AiService {
       return jsonDecode(content);
     } catch (e) { return {"error": "API_ERROR: $e"}; }
   }
+
+  // --- 新增：长文本分析（翻译 / 小作文批改） ---
+  static Future<String> analyzeText(String input, bool isEssay) async {
+    final apiKey = await getApiKey();
+    if (apiKey.isEmpty) return "请先在设置中配置 API Key";
+
+    try {
+      final dio = Dio();
+      String prompt = isEssay 
+          ? "你是一个严厉且专业的英语四六级阅卷老师。请对以下作文进行批改：1. 纠正语法错误 2. 给出四六级高级词汇替换建议 3. 给出评分(满分15) 4. 提供一段高分范文。作文内容：\n$input"
+          : "你是一个精准的翻译引擎。请对以下文本进行中英互译。如果输入英文，请翻译成优美的中文并提取里面的四六级核心词汇；如果输入中文，请翻译成地道的英文：\n$input";
+
+      final response = await dio.post(
+        _apiUrl,
+        options: Options(headers: {"Authorization": "Bearer $apiKey", "Content-Type": "application/json"}),
+        data: {
+          "model": "deepseek-chat",
+          "messages":[
+            {"role": "system", "content": "你是一个英语学习助手，请直接使用Markdown排版输出结果。"},
+            {"role": "user", "content": prompt}
+          ],
+        },
+      );
+      return response.data['choices'][0]['message']['content'];
+    } catch (e) {
+      return "请求失败，请检查网络或API Key：$e";
+    }
+  }
 }
 
 // ==========================================
@@ -480,30 +711,53 @@ class AiService {
 // ==========================================
 enum QuestionType { zhToEn, enToZh, spelling }
 
+class LearningTask {
+  final Word word;
+  final QuestionType qType;
+  LearningTask(this.word, this.qType);
+}
+
+class WordSessionState {
+  int remainingTasks = 3;
+  int mistakes = 0;
+}
+
 class LearningProvider extends ChangeNotifier {
-  List<Word> _todayWords = [];
-  int _currentIndex = 0;
+  List<Word> _todayWords =[];
+  int _currentIndex = 0; // 现在指代 Task 队列的索引
   bool _isLoading = true;
-  QuestionType _currentQType = QuestionType.enToZh;
-  List<String> _options = [];
+  List<String> _options =[];
+
+  // 【新增】任务队列与单词状态记录
+  List<LearningTask> _tasks =[];
+  Map<int, WordSessionState> _wordStates = {};
 
   String aiExplanation = "";
   bool isAiLoading = false;
-  // 完整的AI解析（流结束后的最终JSON字符串，用于收藏）
   String aiFinalJson = "";
 
   bool get isLoading => _isLoading;
-  bool get isFinished => _currentIndex >= _todayWords.length && !_isLoading;
-  Word? get currentWord => _todayWords.isEmpty || isFinished ? null : _todayWords[_currentIndex];
-  QuestionType get currentQType => _currentQType;
+  bool get isFinished => _currentIndex >= _tasks.length && !_isLoading;
+  
+  // 获取当前题目的信息
+  LearningTask? get currentTask => _currentIndex < _tasks.length ? _tasks[_currentIndex] : null;
+  Word? get currentWord => currentTask?.word;
+  QuestionType get currentQType => currentTask?.qType ?? QuestionType.enToZh;
   List<String> get options => List.unmodifiable(_options);
+  
+  // UI 进度计算 (基于完全掌握的单词数量)
   int get totalWords => _todayWords.length;
-  int get progress => _currentIndex;
-  List<Word> get todayWords => List.unmodifiable(_todayWords);
+  int get progress {
+    // 计算已完成的单词数量，但不超过总单词数，防止进度条超过100%
+    int completed = _wordStates.values.where((s) => s.remainingTasks == 0).length;
+    return completed > totalWords ? totalWords : completed;
+  }
+  List<Word> get todayWords => _todayWords;
 
   bool _isTodayTaskDone = false;
   bool get isTodayTaskDone => _isTodayTaskDone;
 
+  // ===== 日常打卡与会话保存 =====
   Future<void> checkDailyStatus() async {
     final prefs = await SharedPreferences.getInstance();
     String lastDate = prefs.getString('last_daily_date') ?? '';
@@ -519,23 +773,40 @@ class LearningProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _saveSession(List<Word> words, int index) async {
+  Future<void> _saveSession() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('session_word_ids', words.map((w) => w.id.toString()).toList());
-    await prefs.setInt('learning_progress', index);
+    // 保存剩余还未完成的题目队列
+    List<String> remaining =[];
+    for (int i = _currentIndex; i < _tasks.length; i++) {
+      remaining.add('${_tasks[i].word.id}_${_tasks[i].qType.index}');
+    }
+    await prefs.setStringList('remaining_tasks', remaining);
   }
 
   Future<void> _clearSession() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('session_word_ids');
-    await prefs.remove('learning_progress');
+    await prefs.remove('remaining_tasks');
   }
 
   Future<bool> hasUnfinishedLearning() async {
     final prefs = await SharedPreferences.getInstance();
-    List<String>? ids = prefs.getStringList('session_word_ids');
-    int prog = prefs.getInt('learning_progress') ?? 0;
-    return ids != null && ids.isNotEmpty && prog > 0 && prog < ids.length;
+    List<String>? tasks = prefs.getStringList('remaining_tasks');
+    return tasks != null && tasks.isNotEmpty;
+  }
+
+  // ===== 加载与生成任务 =====
+  void _buildTasksQueue() {
+    _tasks.clear();
+    _wordStates.clear();
+    for (var w in _todayWords) {
+      _wordStates[w.id] = WordSessionState();
+      // 每个单词生成3种题型
+      _tasks.add(LearningTask(w, QuestionType.zhToEn));
+      _tasks.add(LearningTask(w, QuestionType.enToZh));
+      _tasks.add(LearningTask(w, QuestionType.spelling));
+    }
+    // 【核心】彻底打乱任务队列，将复习词、新词、不同题型完全混合！
+    _tasks.shuffle(); 
   }
 
   Future<int> loadTodayTasks() async {
@@ -544,8 +815,11 @@ class LearningProvider extends ChangeNotifier {
     try {
       _todayWords = await DatabaseHelper.getTodayWords();
       _currentIndex = 0;
-      await _saveSession(_todayWords, _currentIndex);
-      if (_todayWords.isNotEmpty) await _generateQuestion();
+      if (_todayWords.isNotEmpty) {
+        _buildTasksQueue();
+        await _saveSession();
+        await _generateQuestion();
+      }
       return _todayWords.length;
     } catch (e) { return 0; }
     finally { _isLoading = false; notifyListeners(); }
@@ -556,65 +830,88 @@ class LearningProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final prefs = await SharedPreferences.getInstance();
-      List<String>? idsStr = prefs.getStringList('session_word_ids');
-      _currentIndex = prefs.getInt('learning_progress') ?? 0;
-      if (idsStr != null && idsStr.isNotEmpty) {
-        _todayWords = await DatabaseHelper.getWordsByIds(idsStr.map(int.parse).toList());
-      } else {
-        _todayWords = await DatabaseHelper.getTodayWords();
+      List<String>? remaining = prefs.getStringList('remaining_tasks');
+      if (remaining != null && remaining.isNotEmpty) {
+        Set<int> ids = remaining.map((s) => int.parse(s.split('_')[0])).toSet();
+        _todayWords = await DatabaseHelper.getWordsByIds(ids.toList());
+        
+        _tasks.clear();
+        _wordStates.clear();
+        for (var w in _todayWords) _wordStates[w.id] = WordSessionState();
+
+        for (String s in remaining) {
+          var parts = s.split('_');
+          int wId = int.parse(parts[0]);
+          int qIdx = int.parse(parts[1]);
+          var word = _todayWords.firstWhere((w) => w.id == wId);
+          _tasks.add(LearningTask(word, QuestionType.values[qIdx]));
+        }
+        
+        // 恢复剩余任务数
+        for (var w in _todayWords) {
+          _wordStates[w.id]!.remainingTasks = _tasks.where((t) => t.word.id == w.id).length;
+        }
         _currentIndex = 0;
+        await _generateQuestion();
+      } else {
+        await loadTodayTasks();
       }
-      if (_currentIndex >= _todayWords.length) _currentIndex = 0;
-      if (_todayWords.isNotEmpty) await _generateQuestion();
     } catch (e) { debugPrint("继续学习报错: $e"); }
     finally { _isLoading = false; notifyListeners(); }
   }
 
   Future<void> _generateQuestion() async {
     if (currentWord == null) return;
-    final rand = Random().nextInt(3);
-    _currentQType = QuestionType.values[rand];
     _options.clear();
-    if (_currentQType == QuestionType.enToZh) {
+    if (currentQType == QuestionType.enToZh) {
       _options = await DatabaseHelper.getRandomTranslations(currentWord!.translation, 3);
       _options.add(currentWord!.translation);
-    } else if (_currentQType == QuestionType.zhToEn) {
+    } else if (currentQType == QuestionType.zhToEn) {
       _options = await DatabaseHelper.getRandomSpellings(currentWord!.spelling, 3);
       _options.add(currentWord!.spelling);
     }
-    _options.shuffle();
+    if (currentQType != QuestionType.spelling) _options.shuffle();
   }
 
-  /// 返回 null = 答对；返回 Map = 答错，需要显示AI解析
-  /// 【修复】答错时先返回 sentinel，让UI立刻弹窗，再异步推送流式内容
+  // ===== 答题判定 =====
   Future<Map<String, dynamic>?> checkAnswer(String userInput) async {
     if (currentWord == null) return null;
+    
+    var task = currentTask!;
+    var word = task.word;
 
-    bool isCorrect = _currentQType == QuestionType.enToZh
-        ? userInput == currentWord!.translation
-        : userInput.trim().toLowerCase() == currentWord!.spelling.toLowerCase();
+    bool isCorrect = task.qType == QuestionType.enToZh
+        ? userInput == word.translation
+        : userInput.trim().toLowerCase() == word.spelling.toLowerCase();
 
     if (isCorrect) {
-      currentWord!.updateSM2(4);
-      await DatabaseHelper.updateWord(currentWord!);
+      _wordStates[word.id]!.remainingTasks--;
+      
+      // 当前单词的所有混合题型已全部答完
+      if (_wordStates[word.id]!.remainingTasks == 0) {
+        int mistakes = _wordStates[word.id]!.mistakes;
+        int quality = 4; // 默认全对
+        if (mistakes == 1) quality = 3;
+        else if (mistakes == 2) quality = 2;
+        else if (mistakes >= 3) quality = 1;
+
+        word.updateSM2(quality);
+        await DatabaseHelper.updateWord(word);
+      }
       _nextWord();
       return null;
     } else {
-      currentWord!.updateSM2(1);
-      await DatabaseHelper.updateWord(currentWord!);
+      // 答错记录错误次数，并将这道题【重新塞入队列末尾】逼迫重做
+      _wordStates[word.id]!.mistakes++;
+      _tasks.add(LearningTask(word, task.qType));
+      await _saveSession();
 
-      // 【关键修复】先重置，再立刻返回 sentinel 让UI弹窗
-      // 流式内容通过 notifyListeners 异步推入已打开的弹窗
       aiExplanation = "";
       aiFinalJson = "";
       isAiLoading = true;
       notifyListeners();
 
-      // 异步启动流，不 await（让调用方立刻拿到 sentinel）
-      _startAiStream(currentWord!, userInput,
-          _currentQType == QuestionType.spelling ? "拼写" : "单选");
-
-      // 返回空map作为sentinel，告诉UI"答错了，去弹窗"
+      _startAiStream(word, userInput, task.qType == QuestionType.spelling ? "拼写" : "单选");
       return {};
     }
   }
@@ -660,7 +957,7 @@ class LearningProvider extends ChangeNotifier {
       await _clearSession();
       await _markDailyTaskDone();
     } else {
-      await _saveSession(_todayWords, _currentIndex);
+      await _saveSession();
       await _generateQuestion();
     }
     notifyListeners();
@@ -1108,65 +1405,84 @@ class _LearningScreenState extends State<LearningScreen> {
           final questionText = (provider.currentQType == QuestionType.enToZh
               ? word.spelling : word.translation).replaceAll(r'\n', '\n');
 
-          return SafeArea(child: Column(children: [
-            LinearProgressIndicator(
-              value: provider.totalWords > 0 ? provider.progress / provider.totalWords : 0,
-              minHeight: 4,
-            ),
-            Expanded(child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                Text('${provider.progress + 1} / ${provider.totalWords}',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                const SizedBox(height: 28),
-
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  child: Text(questionText,
-                    key: ValueKey('${word.id}_${provider.currentQType}'),
-                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, height: 1.5),
-                    textAlign: TextAlign.center),
+          return SafeArea(
+            child: Focus( // 【新增】外层包裹 Focus 用于监听键盘
+              autofocus: true,
+              onKeyEvent: (node, event) {
+                // 当按下按键，且当前不是拼写题时触发快捷键
+                if (event is KeyDownEvent && provider.currentQType != QuestionType.spelling) {
+                  final key = event.logicalKey.keyLabel;
+                  if (['1', '2', '3', '4'].contains(key)) {
+                    final index = int.parse(key) - 1;
+                    if (index < provider.options.length) {
+                      _handleAnswer(provider.options[index]);
+                      return KeyEventResult.handled;
+                    }
+                  }
+                }
+                return KeyEventResult.ignored;
+              },
+              child: Column(children: [
+                LinearProgressIndicator(
+                  value: provider.totalWords > 0 ? provider.progress / provider.totalWords : 0,
+                  minHeight: 4,
                 ),
-                const SizedBox(height: 36),
+                Expanded(child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Text('掌握进度：${provider.progress} / ${provider.totalWords} (包含额外复习)',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                    const SizedBox(height: 28),
 
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: provider.currentQType == QuestionType.spelling
-                    ? Column(key: ValueKey('spell_${word.id}'), children: [
-                        TextField(
-                          controller: _spellController, autofocus: true,
-                          decoration: const InputDecoration(
-                              border: OutlineInputBorder(), labelText: "请输入对应的英文单词"),
-                          onSubmitted: _handleAnswer,
-                        ),
-                        const SizedBox(height: 14),
-                        SizedBox(width: double.infinity, child: ElevatedButton(
-                          onPressed: () => _handleAnswer(_spellController.text),
-                          child: const Text("提交"),
-                        )),
-                      ])
-                    : Column(
-                        key: ValueKey('options_${word.id}_${provider.options.hashCode}'),
-                        children: provider.options.map((opt) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton(
-                              style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.all(16),
-                              ),
-                              onPressed: () => _handleAnswer(opt),
-                              child: Text(opt.replaceAll(r'\n', '\n'),
-                                  style: const TextStyle(fontSize: 15), textAlign: TextAlign.center),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: Text(questionText,
+                        key: ValueKey('${word.id}_${provider.currentQType}'),
+                        style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, height: 1.5),
+                        textAlign: TextAlign.center),
+                    ),
+                    const SizedBox(height: 36),
+
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: provider.currentQType == QuestionType.spelling
+                        ? Column(key: ValueKey('spell_${word.id}'), children: [
+                            TextField(
+                              controller: _spellController, autofocus: true,
+                              decoration: const InputDecoration(
+                                  border: OutlineInputBorder(), labelText: "请输入对应的英文单词"),
+                              onSubmitted: _handleAnswer,
                             ),
+                            const SizedBox(height: 14),
+                            SizedBox(width: double.infinity, child: ElevatedButton(
+                              onPressed: () => _handleAnswer(_spellController.text),
+                              child: const Text("提交"),
+                            )),
+                          ])
+                        : Column(
+                            key: ValueKey('options_${word.id}_${provider.options.hashCode}'),
+                            children: provider.options.map((opt) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton(
+                                  style: OutlinedButton.styleFrom(
+                                    padding: const EdgeInsets.all(16),
+                                  ),
+                                  onPressed: () => _handleAnswer(opt),
+                                  child: Text(opt.replaceAll(r'\n', '\n'),
+                                      style: const TextStyle(fontSize: 15), textAlign: TextAlign.center),
+                                ),
+                              ),
+                            )).toList(),
                           ),
-                        )).toList(),
-                      ),
-                ),
+                    ),
+                  ]),
+                )),
               ]),
-            )),
-          ]));
+            ),
+          );
         },
       ),
     );
@@ -1654,8 +1970,52 @@ class _AdvancedPracticeScreenState extends State<AdvancedPracticeScreen> {
                   child: const Text("同词再来一次"),
                 )),
               ]),
+              
+              // 【修改】将词汇阵列移到这个 if 内部，生成结果后才显示
+              const SizedBox(height: 30),
+              const Divider(),
+              const Text("词汇阵列：", style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 40,
+                child: Consumer<LearningProvider>(
+                  builder: (context, provider, child) {
+                    if (provider.todayWords.isEmpty) {
+                      return const Center(
+                        child: Text("暂无今日词汇", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      );
+                    }
+                    return ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: provider.todayWords.length,
+                      itemBuilder: (context, index) {
+                        final w = provider.todayWords[index];
+                        final isCurrent = index == provider.progress;
+                        final isPassed = index < provider.progress;
+                        return Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: isCurrent ? Colors.indigo : (isPassed ? Colors.green : Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Center(
+                            child: Text(
+                              w.spelling, 
+                              style: TextStyle(
+                                color: (isCurrent || isPassed) ? Colors.white : Colors.black54, 
+                                fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal
+                              )
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
             ],
-          ],
+          ], // 这里是 if (_exerciseData != null) 的闭合括号
 
           const SizedBox(height: 40),
         ]),

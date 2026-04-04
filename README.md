@@ -145,13 +145,32 @@ cet46software/
 - `Word`: 词汇数据模型，包含 SM2 算法相关属性
 - `FavoriteEntry`: 收藏条目数据模型
 
+## 构建与发布
+
+### Linux 版本
+
+项目支持构建 Linux 桌面版本，使用以下命令构建：
+
+```bash
+flutter build linux --release
+```
+
+构建完成后，可执行文件位于 `build/linux/x64/release/bundle/cet46software`。
+
+### Windows 和 macOS 版本
+
+项目同样支持构建 Windows 和 macOS 版本：
+
+- Windows: `flutter build windows --release`
+- macOS: `flutter build macos --release`
+
 ## 贡献
 
 欢迎提交 Issue 和 Pull Request 来改进本项目。
 
 ## 许可证
 
-本项目采用 CC-BY-NC-SA 许可证。
+本项目采用 MIT 许可证。
 
 ## 致谢
 
