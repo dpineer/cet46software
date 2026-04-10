@@ -14,6 +14,8 @@ import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'adapter/ai_service_manager.dart';
+import 'adapter/lm_studio_settings.dart';
 
 // ==========================================
 // 主题状态管理
@@ -2121,45 +2123,269 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
 
         const Divider(height: 40),
-        const Text("DeepSeek API 配置",
+        
+        // AI服务选择器
+        const Text("AI 服务配置",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
         const SizedBox(height: 10),
-        const Text("密钥将加密存储在本地设备，不会上传到任何第三方服务器。",
-            style: TextStyle(color: Colors.grey, fontSize: 13)),
-        const SizedBox(height: 20),
-        TextField(
-          controller: _keyController, obscureText: true,
-          decoration: const InputDecoration(
-              labelText: "API Key", border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.key), hintText: "sk-..."),
+        
+        // AI服务类型选择
+        FutureBuilder<Map<String, dynamic>>(
+          future: AIServiceManager.getCurrentServiceStatus(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            
+            final status = snapshot.data!;
+            final isConfigured = status['isConfigured'] as bool;
+            final serviceName = status['name'] as String;
+            final serviceDesc = status['description'] as String;
+            final statusText = status['status'] as String;
+            final statusColor = status['statusColor'] as String;
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              isConfigured ? Icons.check_circle : Icons.warning,
+                              color: isConfigured ? Colors.green : Colors.orange,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "当前服务: $serviceName",
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  Text(
+                                    serviceDesc,
+                                    style: const TextStyle(
+                                      color: Colors.grey,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: statusColor == 'green' 
+                                    ? Colors.green.shade100 
+                                    : Colors.red.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                statusText,
+                                style: TextStyle(
+                                  color: statusColor == 'green' 
+                                      ? Colors.green.shade800 
+                                      : Colors.red.shade800,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                icon: const Icon(Icons.swap_horiz),
+                                label: const Text("切换服务"),
+                                onPressed: () async {
+                                  final newType = await AIServiceManager.toggleService();
+                                  setState(() {});
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text("已切换到 ${newType.name}"),
+                                      backgroundColor: Colors.blue,
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            if (status['type'] == AIServiceType.lmStudio)
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  icon: const Icon(Icons.settings),
+                                  label: const Text("LM-Studio设置"),
+                                  onPressed: () {
+                                    showLMStudioSettings(context);
+                                  },
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: const Text("刷新状态"),
+                          onPressed: () {
+                            setState(() {});
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text("状态已刷新"),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+            );
+          },
         ),
-        const SizedBox(height: 20),
-        ElevatedButton(
-          onPressed: _isLoading ? null : _saveKey,
-          style: ElevatedButton.styleFrom(
-              padding: const EdgeInsets.all(15),
-              backgroundColor: _isSaved ? Colors.green : Colors.indigo,
-              foregroundColor: Colors.white),
-          child: _isLoading
-              ? const SizedBox(height: 20, width: 20,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-              : Text(_isSaved ? "保存成功" : "保存配置"),
+        
+        // DeepSeek API配置（仅在DeepSeek时显示）
+        FutureBuilder<AIServiceType>(
+          future: AIServiceManager.getCurrentServiceType(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox();
+            }
+            
+            final serviceType = snapshot.data!;
+            if (serviceType != AIServiceType.deepseek) {
+              return const SizedBox();
+            }
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("DeepSeek API 配置",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                const SizedBox(height: 10),
+                const Text("密钥将加密存储在本地设备，不会上传到任何第三方服务器。",
+                    style: TextStyle(color: Colors.grey, fontSize: 13)),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _keyController, obscureText: true,
+                  decoration: const InputDecoration(
+                      labelText: "API Key", border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.key), hintText: "sk-..."),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: _isLoading ? null : _saveKey,
+                  style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.all(15),
+                      backgroundColor: _isSaved ? Colors.green : Colors.indigo,
+                      foregroundColor: Colors.white),
+                  child: _isLoading
+                      ? const SizedBox(height: 20, width: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(_isSaved ? "保存成功" : "保存配置"),
+                ),
+                if (_keyController.text.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.delete, color: Colors.red),
+                      label: const Text("清除已保存的 Key", style: TextStyle(color: Colors.red)),
+                      onPressed: () async {
+                        await AiService.deleteApiKey();
+                        _keyController.clear();
+                        setState(() {});
+                        if (context.mounted)
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已清除 Key")));
+                      },
+                    ),
+                  ),
+                const SizedBox(height: 20),
+              ],
+            );
+          },
         ),
-        if (_keyController.text.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: TextButton.icon(
-              icon: const Icon(Icons.delete, color: Colors.red),
-              label: const Text("清除已保存的 Key", style: TextStyle(color: Colors.red)),
-              onPressed: () async {
-                await AiService.deleteApiKey();
-                _keyController.clear();
-                setState(() {});
-                if (context.mounted)
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已清除 Key")));
-              },
-            ),
-          ),
+        
+        // LM-Studio配置说明
+        FutureBuilder<AIServiceType>(
+          future: AIServiceManager.getCurrentServiceType(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const SizedBox();
+            }
+            
+            final serviceType = snapshot.data!;
+            if (serviceType != AIServiceType.lmStudio) {
+              return const SizedBox();
+            }
+            
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("LM-Studio 配置",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
+                const SizedBox(height: 10),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          "使用说明：",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "1. 下载并安装 LM-Studio (https://lmstudio.ai/)",
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        const Text(
+                          "2. 启动 LM-Studio 并加载模型",
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        const Text(
+                          "3. 在 LM-Studio 中启动本地服务器",
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        const Text(
+                          "4. 点击上面的'LM-Studio设置'配置连接",
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.settings),
+                          label: const Text("打开LM-Studio设置"),
+                          onPressed: () {
+                            showLMStudioSettings(context);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.deepPurple,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+            );
+          },
+        ),
       ]),
     );
   }
