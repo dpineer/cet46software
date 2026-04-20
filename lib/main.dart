@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'adapter/ai_service_manager.dart';
 import 'adapter/lm_studio_settings.dart';
+import 'adapter/lm_studio_adapter.dart';
 
 // ==========================================
 // 主题状态管理
@@ -530,7 +531,7 @@ class DatabaseHelper {
 }
 
 // ==========================================
-// AI 服务
+// AI 服务 (已重构为多后端路由网关)
 // ==========================================
 class AiService {
   static const _storage = FlutterSecureStorage(
@@ -544,10 +545,22 @@ class AiService {
   static Future<void> saveApiKey(String key) async => await _storage.write(key: _keyName, value: key);
   static Future<void> deleteApiKey() async => await _storage.delete(key: _keyName);
 
+  /// 流式解释网关 (支持双栈)
   static Future<void> getExplanationStream(
     Word word, String userInput, String qType,
     Function(String) onStreamUpdate, Function(String)? onError,
   ) async {
+    // [FIX] 路由鉴权层：拦截并判断当前后端策略
+    final serviceType = await AIServiceManager.getCurrentServiceType();
+    if (serviceType == AIServiceType.lmStudio) {
+      // 转发至 LM-Studio 适配器
+      await LMStudioAiService.getExplanationStream(
+        word.spelling, word.translation, userInput, qType, onStreamUpdate, onError
+      );
+      return;
+    }
+
+    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) {
       onStreamUpdate(jsonEncode({"error_analysis": "CONFIG_REQUIRED"}));
@@ -566,7 +579,7 @@ class AiService {
         _apiUrl,
         data: {
           "model": "deepseek-chat",
-          "messages": [
+          "messages":[
             {"role": "system", "content": "只返回合法JSON，不含markdown代码块，不含多余文字。"},
             {"role": "user", "content": prompt}
           ],
@@ -592,7 +605,6 @@ class AiService {
                 final delta = jsonData['choices'][0]['delta']['content'];
                 if (delta != null) {
                   accumulated += delta as String;
-                  // 清理markdown标记后实时推送
                   final cleaned = accumulated
                       .replaceAll(RegExp(r'^```json\s*', multiLine: false), '')
                       .replaceAll(RegExp(r'^```\s*', multiLine: false), '')
@@ -613,7 +625,15 @@ class AiService {
     } catch (e) { onError?.call("API_ERROR: $e"); }
   }
 
+  /// 详细解释网关 (支持双栈)
   static Future<Map<String, dynamic>> getDetailedExplanation(Word word) async {
+    // [FIX] 路由鉴权层
+    final serviceType = await AIServiceManager.getCurrentServiceType();
+    if (serviceType == AIServiceType.lmStudio) {
+      return await LMStudioAiService.getDetailedExplanation(word.spelling, word.translation);
+    }
+
+    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) return {"error": "CONFIG_REQUIRED"};
     try {
@@ -633,7 +653,7 @@ class AiService {
         options: Options(headers: {"Authorization": "Bearer $apiKey", "Content-Type": "application/json"}),
         data: {
           "model": "deepseek-chat",
-          "messages": [
+          "messages":[
             {"role": "system", "content": "只返回合法JSON，不含markdown代码块。"},
             {"role": "user", "content": prompt}
           ],
@@ -645,14 +665,23 @@ class AiService {
     } catch (e) { return {"error": "API_ERROR: $e"}; }
   }
 
-  // 进阶练习：生成填空段落
+  /// 生成填空段落网关 (支持双栈)
   static Future<Map<String, dynamic>> generateFillBlankParagraph(List<Word> words) async {
+    // [FIX] 路由鉴权层
+    final serviceType = await AIServiceManager.getCurrentServiceType();
+    if (serviceType == AIServiceType.lmStudio) {
+      // 数据结构转换映射 Word -> Map
+      final wordList = words.map((w) => {'spelling': w.spelling, 'translation': w.translation}).toList();
+      return await LMStudioAiService.generateFillBlankParagraph(wordList);
+    }
+
+    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) return {"error": "CONFIG_REQUIRED"};
     try {
       final dio = Dio();
-      final wordList = words.map((w) => "${w.spelling}（${w.translation}）").join("、");
-      final prompt = """请用以下单词造一个连贯的英文小段落（3-5句话）：$wordList
+      final wordListStr = words.map((w) => "${w.spelling}（${w.translation}）").join("、");
+      final prompt = """请用以下单词造一个连贯的英文小段落（3-5句话）：$wordListStr
 要求：
 1. 每个单词在段落中各出现一次
 2. 段落语义自然连贯
@@ -667,7 +696,7 @@ class AiService {
         options: Options(headers: {"Authorization": "Bearer $apiKey", "Content-Type": "application/json"}),
         data: {
           "model": "deepseek-chat",
-          "messages": [
+          "messages":[
             {"role": "system", "content": "只返回合法JSON，不含markdown代码块。"},
             {"role": "user", "content": prompt}
           ],
@@ -679,8 +708,15 @@ class AiService {
     } catch (e) { return {"error": "API_ERROR: $e"}; }
   }
 
-  // --- 新增：长文本分析（翻译 / 小作文批改） ---
+  /// 长文本分析网关 (支持双栈)
   static Future<String> analyzeText(String input, bool isEssay) async {
+    // [FIX] 路由鉴权层
+    final serviceType = await AIServiceManager.getCurrentServiceType();
+    if (serviceType == AIServiceType.lmStudio) {
+      return await LMStudioAiService.analyzeText(input, isEssay);
+    }
+
+    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) return "请先在设置中配置 API Key";
 
@@ -2044,7 +2080,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() { super.initState(); _loadKey(); }
 
   Future<void> _loadKey() async {
-    final key = await AiService.getApiKey();
+    final key = await UnifiedAiService.getApiKey();
     if (mounted) { _keyController.text = key; setState(() => _isLoading = false); }
   }
 
@@ -2054,7 +2090,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     setState(() => _isLoading = true);
-    await AiService.saveApiKey(_keyController.text.trim());
+    await UnifiedAiService.saveApiKey(_keyController.text.trim());
     if (mounted) {
       setState(() { _isLoading = false; _isSaved = true; });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2305,7 +2341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: const Icon(Icons.delete, color: Colors.red),
                       label: const Text("清除已保存的 Key", style: TextStyle(color: Colors.red)),
                       onPressed: () async {
-                        await AiService.deleteApiKey();
+                        await UnifiedAiService.deleteApiKey();
                         _keyController.clear();
                         setState(() {});
                         if (context.mounted)

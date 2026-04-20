@@ -1,4 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
+import 'lm_studio_adapter.dart' as lmStudio;
 
 // ==========================================
 // AI服务类型枚举
@@ -177,13 +178,9 @@ class UnifiedAiService {
     final serviceType = await AIServiceManager.getCurrentServiceType();
     
     if (serviceType == AIServiceType.lmStudio) {
-      // 导入LM-Studio适配器
-      // 注意：这里需要实际导入lm_studio_adapter.dart
-      // 为了编译通过，这里使用条件编译或动态导入
+      // 使用LM-Studio适配器
       try {
-        // 动态导入LM-Studio适配器
-        // 实际实现中应该使用 import 'lm_studio_adapter.dart';
-        return {'error': 'LM_STUDIO_NOT_IMPLEMENTED', 'message': '请集成LM-Studio适配器'};
+        return await lmStudio.LMStudioAiService.getDetailedExplanation(spelling, translation);
       } catch (e) {
         return {'error': 'LM_STUDIO_ERROR', 'message': 'LM-Studio服务未配置: $e'};
       }
@@ -205,9 +202,8 @@ class UnifiedAiService {
     if (serviceType == AIServiceType.lmStudio) {
       // 使用LM-Studio适配器
       try {
-        // 动态导入LM-Studio适配器
-        // 实际实现中应该使用 import 'lm_studio_adapter.dart';
-        onError?.call('LM_STUDIO_NOT_IMPLEMENTED: 请集成LM-Studio适配器');
+        await lmStudio.LMStudioAiService.getExplanationStream(
+          spelling, translation, userInput, qType, onStreamUpdate, onError);
       } catch (e) {
         onError?.call('LM_STUDIO_ERROR: $e');
       }
@@ -224,7 +220,11 @@ class UnifiedAiService {
     final prefs = await SharedPreferences.getInstance();
     
     if (serviceType == AIServiceType.lmStudio) {
-      return prefs.getString('lm_studio_api_key') ?? '';
+      final key = prefs.getString('lm_studio_api_key');
+      // [FIX] 核心修复逻辑：
+      // 大多网络库(如OpenAI SDK)在序列化层具有强校验机制，ApiKey为空串会引发 CONFIG_REQUIRED 拦截报错。
+      // LM-Studio由于是本地服务通常无需鉴权，因此若用户未配置，系统应默认注入一个占位符以通过拦截器校验。
+      return (key != null && key.isNotEmpty) ? key : 'lm-studio-local-dummy-key';
     } else {
       return prefs.getString('deepseek_api_key') ?? '';
     }
