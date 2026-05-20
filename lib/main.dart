@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math';
 import 'dart:io' as io;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,11 +11,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'adapter/ai_service_manager.dart';
-import 'adapter/lm_studio_settings.dart';
-import 'adapter/lm_studio_adapter.dart';
 
 // ==========================================
 // 主题状态管理
@@ -45,178 +39,13 @@ class ThemeProvider extends ChangeNotifier {
 }
 
 // ==========================================
-// 句段翻译与小作文界面 + OCR 唤起
+// 主导航 (直接展示背单词主页)
 // ==========================================
-class TranslationEssayScreen extends StatefulWidget {
-  final String? initialText;
-  const TranslationEssayScreen({super.key, this.initialText});
-
-  @override
-  State<TranslationEssayScreen> createState() => _TranslationEssayScreenState();
-}
-
-class _TranslationEssayScreenState extends State<TranslationEssayScreen> {
-  late TextEditingController _textController;
-  bool _isEssayMode = false;
-  bool _isProcessing = false;
-  String _aiResult = "";
-
-  @override
-  void initState() {
-    super.initState();
-    _textController = TextEditingController(text: widget.initialText ?? "");
-  }
-
-  // 拍照 OCR 核心逻辑
-  Future<void> _pickAndRecognize(ImageSource source) async {
-    // 【新增】多端平台拦截：仅限手机端运行 ML Kit
-    if (kIsWeb || !(io.Platform.isAndroid || io.Platform.isIOS)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("提示：本地 OCR 识别模块目前仅支持安装在 Android/iOS 手机端运行。"))
-      );
-      return;
-    }
-
-    final pickedFile = await ImagePicker().pickImage(source: source);
-    if (pickedFile == null) return;
-    
-    setState(() => _isProcessing = true);
-    try {
-      final inputImage = InputImage.fromFilePath(pickedFile.path);
-      // 使用中文脚本识别器，完美兼容中英混合
-      final textRecognizer = TextRecognizer(script: TextRecognitionScript.chinese);
-      final RecognizedText recognizedText = await textRecognizer.processImage(inputImage);
-      
-      setState(() {
-        // 将识别到的文字追加到输入框中
-        _textController.text = _textController.text + recognizedText.text;
-      });
-      await textRecognizer.close();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("OCR 识别失败: $e")));
-    } finally {
-      setState(() => _isProcessing = false);
-    }
-  }
-
-  // 提交给 DeepSeek 分析
-  Future<void> _submitToAi() async {
-    if (_textController.text.trim().isEmpty) return;
-    setState(() => _isProcessing = true);
-    
-    final result = await AiService.analyzeText(_textController.text, _isEssayMode);
-    
-    setState(() {
-      _aiResult = result;
-      _isProcessing = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text("读写特训营"),
-        actions: [
-          Row(
-            children:[
-              const Text("句段翻译"),
-              Switch(
-                value: _isEssayMode,
-                activeColor: Colors.orange,
-                onChanged: (val) => setState(() => _isEssayMode = val),
-              ),
-              const Text("作文批改  "),
-            ],
-          )
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children:[
-            // 文本输入区
-            TextField(
-              controller: _textController,
-              maxLines: 6,
-              decoration: InputDecoration(
-                hintText: _isEssayMode ? "请在此输入或拍照导入你的四六级英语作文..." : "请在此输入需要翻译的中文或英文长难句...",
-                border: const OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 10),
-            
-            // 操作按钮区
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children:[
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.camera_alt),
-                  label: const Text("拍照识字"),
-                  onPressed: () => _pickAndRecognize(ImageSource.camera),
-                ),
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.photo_library),
-                  label: const Text("相册导入"),
-                  onPressed: () => _pickAndRecognize(ImageSource.gallery),
-                ),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.auto_awesome),
-                  label: Text(_isEssayMode ? "AI 批改作文" : "AI 翻译"),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.indigo, foregroundColor: Colors.white),
-                  onPressed: _isProcessing ? null : _submitToAi,
-                ),
-              ],
-            ),
-            const Divider(height: 30),
-            
-            // AI 结果展示区
-            Expanded(
-              child: _isProcessing 
-                ? const Center(child: CircularProgressIndicator())
-                : SingleChildScrollView(
-                    child: SelectableText(
-                      _aiResult.isEmpty ? "AI 诊断结果将显示在这里..." : _aiResult,
-                      style: const TextStyle(fontSize: 16, height: 1.5),
-                    ),
-                  ),
-            )
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ==========================================
-// 全新主导航页 (底部导航栏)
-// ==========================================
-class MainTabScreen extends StatefulWidget {
+class MainTabScreen extends StatelessWidget {
   const MainTabScreen({super.key});
   @override
-  State<MainTabScreen> createState() => _MainTabScreenState();
-}
-
-class _MainTabScreenState extends State<MainTabScreen> {
-  int _currentIndex = 0;
-  final List<Widget> _pages =[
-    const HomeScreen(),          // Tab 0: 原来的背单词页面
-    const TranslationEssayScreen(), // Tab 1: 翻译与作文
-  ];
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _pages[_currentIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
-        items: const[
-          BottomNavigationBarItem(icon: Icon(Icons.style), label: "背单词"),
-          BottomNavigationBarItem(icon: Icon(Icons.edit_document), label: "翻译与作文"),
-        ],
-      ),
-    );
+    return const HomeScreen();
   }
 }
 
@@ -398,6 +227,15 @@ class DatabaseHelper {
       )
     ''');
 
+    // 建同义词表（如不存在）
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS synonyms (
+        wordId INTEGER PRIMARY KEY,
+        synonyms TEXT NOT NULL,
+        antonyms TEXT NOT NULL
+      )
+    ''');
+
     return db;
   }
 
@@ -459,12 +297,17 @@ class DatabaseHelper {
       final data = await rootBundle.load('assets/cet_words.db');
       final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
       await io.File(dbPath).writeAsBytes(bytes, flush: true);
-      // 重新建收藏表
+      // 重新建收藏表和同义词表
       final db = await database;
       await db.execute('''
         CREATE TABLE IF NOT EXISTS favorites (
           wordId INTEGER PRIMARY KEY, spelling TEXT NOT NULL,
           translation TEXT NOT NULL, aiJson TEXT NOT NULL, savedAt INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS synonyms (
+          wordId INTEGER PRIMARY KEY, synonyms TEXT NOT NULL, antonyms TEXT NOT NULL
         )
       ''');
       return true;
@@ -483,11 +326,16 @@ class DatabaseHelper {
         if (_database != null) { await _database!.close(); _database = null; }
         await sourceFile.copy(dbPath);
         final db = await database;
-        // 确保收藏表存在
+        // 确保收藏表和同义词表存在
         await db.execute('''
           CREATE TABLE IF NOT EXISTS favorites (
             wordId INTEGER PRIMARY KEY, spelling TEXT NOT NULL,
             translation TEXT NOT NULL, aiJson TEXT NOT NULL, savedAt INTEGER NOT NULL
+          )
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS synonyms (
+            wordId INTEGER PRIMARY KEY, synonyms TEXT NOT NULL, antonyms TEXT NOT NULL
           )
         ''');
         final countResult = await db.rawQuery('SELECT COUNT(*) as count FROM words');
@@ -528,10 +376,45 @@ class DatabaseHelper {
     final ids = favs.map((f) => f['wordId'] as int).toList();
     return getWordsByIds(ids);
   }
+
+  // ========== 搜索相关 ==========
+  /// 根据拼写或翻译搜索单词
+  static Future<List<Word>> searchWords(String query) async {
+    if (query.trim().isEmpty) return [];
+    final db = await database;
+    final pattern = '%${query.trim()}%';
+    final maps = await db.rawQuery(
+      'SELECT * FROM words WHERE spelling LIKE ? OR translation LIKE ? LIMIT 50',
+      [pattern, pattern]
+    );
+    return maps.map((m) => Word.fromMap(m)).toList();
+  }
+
+  // ========== 同义词相关 ==========
+  /// 获取缓存的同义词
+  static Future<Map<String, String>?> getSynonyms(int wordId) async {
+    final db = await database;
+    final maps = await db.query('synonyms', where: 'wordId = ?', whereArgs: [wordId]);
+    if (maps.isEmpty) return null;
+    return {
+      'synonyms': maps.first['synonyms'] as String,
+      'antonyms': maps.first['antonyms'] as String,
+    };
+  }
+
+  /// 保存同义词到缓存
+  static Future<void> saveSynonyms(int wordId, String synonyms, String antonyms) async {
+    final db = await database;
+    await db.insert('synonyms', {
+      'wordId': wordId,
+      'synonyms': synonyms,
+      'antonyms': antonyms,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
 }
 
 // ==========================================
-// AI 服务 (已重构为多后端路由网关)
+// AI 服务 (DeepSeek 在线API)
 // ==========================================
 class AiService {
   static const _storage = FlutterSecureStorage(
@@ -545,22 +428,11 @@ class AiService {
   static Future<void> saveApiKey(String key) async => await _storage.write(key: _keyName, value: key);
   static Future<void> deleteApiKey() async => await _storage.delete(key: _keyName);
 
-  /// 流式解释网关 (支持双栈)
+  /// 流式解释
   static Future<void> getExplanationStream(
     Word word, String userInput, String qType,
     Function(String) onStreamUpdate, Function(String)? onError,
   ) async {
-    // [FIX] 路由鉴权层：拦截并判断当前后端策略
-    final serviceType = await AIServiceManager.getCurrentServiceType();
-    if (serviceType == AIServiceType.lmStudio) {
-      // 转发至 LM-Studio 适配器
-      await LMStudioAiService.getExplanationStream(
-        word.spelling, word.translation, userInput, qType, onStreamUpdate, onError
-      );
-      return;
-    }
-
-    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) {
       onStreamUpdate(jsonEncode({"error_analysis": "CONFIG_REQUIRED"}));
@@ -568,11 +440,10 @@ class AiService {
     }
     try {
       final dio = Dio();
-      final prompt = """单词：${word.spelling}（${word.translation}）。学生在${qType}时输入：$userInput。
+      final prompt = """单词：${word.spelling}（${word.translation}）。学生在${qType}时输入了错误答案：$userInput。
 请用JSON返回以下字段（每个字段都必须是字符串，例句独立成字段）：
-- error_analysis（一段话分析错误原因，不超过3句）
-- etymology（词源词根分析）
-- mnemonic（记忆法）
+- mnemonic（记忆法：注重使用语义、词汇来源、谐音、等最贴切、接地气的方法来帮助记忆，挑选最合适的）
+- etymology（单词说明与词源分析）
 - example（3个例句，用\\n分隔）""";
 
       Response<ResponseBody> response = await dio.post<ResponseBody>(
@@ -625,15 +496,8 @@ class AiService {
     } catch (e) { onError?.call("API_ERROR: $e"); }
   }
 
-  /// 详细解释网关 (支持双栈)
+  /// 详细解释
   static Future<Map<String, dynamic>> getDetailedExplanation(Word word) async {
-    // [FIX] 路由鉴权层
-    final serviceType = await AIServiceManager.getCurrentServiceType();
-    if (serviceType == AIServiceType.lmStudio) {
-      return await LMStudioAiService.getDetailedExplanation(word.spelling, word.translation);
-    }
-
-    // ---------- 降级至原 DeepSeek 逻辑 ----------
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) return {"error": "CONFIG_REQUIRED"};
     try {
@@ -665,17 +529,51 @@ class AiService {
     } catch (e) { return {"error": "API_ERROR: $e"}; }
   }
 
-  /// 生成填空段落网关 (支持双栈)
-  static Future<Map<String, dynamic>> generateFillBlankParagraph(List<Word> words) async {
-    // [FIX] 路由鉴权层
-    final serviceType = await AIServiceManager.getCurrentServiceType();
-    if (serviceType == AIServiceType.lmStudio) {
-      // 数据结构转换映射 Word -> Map
-      final wordList = words.map((w) => {'spelling': w.spelling, 'translation': w.translation}).toList();
-      return await LMStudioAiService.generateFillBlankParagraph(wordList);
-    }
+  /// 获取同义词和反义词（AI生成）
+  static Future<Map<String, String>> getSynonyms(Word word) async {
+    // 先查本地缓存
+    final cached = await DatabaseHelper.getSynonyms(word.id);
+    if (cached != null) return cached;
 
-    // ---------- 降级至原 DeepSeek 逻辑 ----------
+    // 缓存未命中，请求AI
+    final apiKey = await getApiKey();
+    if (apiKey.isEmpty) {
+      return {'synonyms': '请配置API Key后使用', 'antonyms': '请配置API Key后使用'};
+    }
+    try {
+      final dio = Dio();
+      final prompt = """单词：${word.spelling}（${word.translation}）。
+请用JSON返回以下字段（值均为字符串）：
+- synonyms（列出5-8个同义词/近义词，格式：word1,word2,word3...，附带中文解释）
+- antonyms（列出3-5个反义词，格式：word1,word2,word3...，附带中文解释）""";
+
+      final response = await dio.post(_apiUrl,
+        options: Options(headers: {"Authorization": "Bearer $apiKey", "Content-Type": "application/json"}),
+        data: {
+          "model": "deepseek-chat",
+          "messages":[
+            {"role": "system", "content": "只返回合法JSON，不含markdown代码块。"},
+            {"role": "user", "content": prompt}
+          ],
+        },
+      );
+      String content = response.data['choices'][0]['message']['content'];
+      content = content.replaceAll(RegExp(r'```json\s*|\s*```'), '').trim();
+      final data = jsonDecode(content) as Map<String, dynamic>;
+      final result = {
+        'synonyms': (data['synonyms'] ?? '').toString(),
+        'antonyms': (data['antonyms'] ?? '').toString(),
+      };
+      // 缓存结果
+      await DatabaseHelper.saveSynonyms(word.id, result['synonyms']!, result['antonyms']!);
+      return result;
+    } catch (e) {
+      return {'synonyms': '获取失败：$e', 'antonyms': '获取失败：$e'};
+    }
+  }
+
+  /// 生成填空段落
+  static Future<Map<String, dynamic>> generateFillBlankParagraph(List<Word> words) async {
     final apiKey = await getApiKey();
     if (apiKey.isEmpty) return {"error": "CONFIG_REQUIRED"};
     try {
@@ -707,47 +605,14 @@ class AiService {
       return jsonDecode(content);
     } catch (e) { return {"error": "API_ERROR: $e"}; }
   }
-
-  /// 长文本分析网关 (支持双栈)
-  static Future<String> analyzeText(String input, bool isEssay) async {
-    // [FIX] 路由鉴权层
-    final serviceType = await AIServiceManager.getCurrentServiceType();
-    if (serviceType == AIServiceType.lmStudio) {
-      return await LMStudioAiService.analyzeText(input, isEssay);
-    }
-
-    // ---------- 降级至原 DeepSeek 逻辑 ----------
-    final apiKey = await getApiKey();
-    if (apiKey.isEmpty) return "请先在设置中配置 API Key";
-
-    try {
-      final dio = Dio();
-      String prompt = isEssay 
-          ? "你是一个严厉且专业的英语四六级阅卷老师。请对以下作文进行批改：1. 纠正语法错误 2. 给出四六级高级词汇替换建议 3. 给出评分(满分15) 4. 提供一段高分范文。作文内容：\n$input"
-          : "你是一个精准的翻译引擎。请对以下文本进行中英互译。如果输入英文，请翻译成优美的中文并提取里面的四六级核心词汇；如果输入中文，请翻译成地道的英文：\n$input";
-
-      final response = await dio.post(
-        _apiUrl,
-        options: Options(headers: {"Authorization": "Bearer $apiKey", "Content-Type": "application/json"}),
-        data: {
-          "model": "deepseek-chat",
-          "messages":[
-            {"role": "system", "content": "你是一个英语学习助手，请直接使用Markdown排版输出结果。"},
-            {"role": "user", "content": prompt}
-          ],
-        },
-      );
-      return response.data['choices'][0]['message']['content'];
-    } catch (e) {
-      return "请求失败，请检查网络或API Key：$e";
-    }
-  }
 }
 
 // ==========================================
 // 状态管理
 // ==========================================
 enum QuestionType { zhToEn, enToZh, spelling }
+
+enum AppMode { test, study }
 
 class LearningTask {
   final Word word;
@@ -760,7 +625,19 @@ class WordSessionState {
   int mistakes = 0;
 }
 
+/// 测试模式中每个单词的答题结果
+class TestWordResult {
+  bool hasDontKnow = false;
+  bool hasWrong = false;
+  bool skipped = false;
+}
+
 class LearningProvider extends ChangeNotifier {
+  AppMode _mode = AppMode.test;
+  AppMode get mode => _mode;
+  bool get isTestMode => _mode == AppMode.test;
+  bool get isStudyMode => _mode == AppMode.study;
+
   List<Word> _todayWords =[];
   int _currentIndex = 0; // 现在指代 Task 队列的索引
   bool _isLoading = true;
@@ -769,13 +646,36 @@ class LearningProvider extends ChangeNotifier {
   // 【新增】任务队列与单词状态记录
   List<LearningTask> _tasks =[];
   Map<int, WordSessionState> _wordStates = {};
+  // 【新增】测试模式结果追踪
+  Map<int, TestWordResult> _testResults = {};
+  Map<int, TestWordResult> get testResults => Map.unmodifiable(_testResults);
+  // 学习模式中待复习的单词ID列表（来自测试结果，通过 getTestWrongWords 获取）
 
   String aiExplanation = "";
   bool isAiLoading = false;
   String aiFinalJson = "";
+  
+  // 【新增】保存用户最后一次输入的答案，用于UI层差异比对
+  String lastUserInput = "";
+  // 【新增】测试模式下显示的正确答案（短暂展示后自动跳转）
+  String testCorrectAnswer = "";
+  bool testShowAnswer = false;
 
   bool get isLoading => _isLoading;
   bool get isFinished => _currentIndex >= _tasks.length && !_isLoading;
+  
+  // 【新增】判断是否允许退回到上一题
+  bool get canGoPrevious => _currentIndex > 0;
+
+  // 【新增】上一题（状态回溯）功能
+  Future<void> goPrevious() async {
+    if (canGoPrevious) {
+      _currentIndex--;
+      await _saveSession();
+      await _generateQuestion();
+      notifyListeners();
+    }
+  }
   
   // 获取当前题目的信息
   LearningTask? get currentTask => _currentIndex < _tasks.length ? _tasks[_currentIndex] : null;
@@ -838,16 +738,77 @@ class LearningProvider extends ChangeNotifier {
     _wordStates.clear();
     for (var w in _todayWords) {
       _wordStates[w.id] = WordSessionState();
-      // 每个单词生成3种题型
-      _tasks.add(LearningTask(w, QuestionType.zhToEn));
-      _tasks.add(LearningTask(w, QuestionType.enToZh));
-      _tasks.add(LearningTask(w, QuestionType.spelling));
+      if (isTestMode) {
+        // 测试模式：仅选择题（zhToEn + enToZh），无拼写
+        _tasks.add(LearningTask(w, QuestionType.zhToEn));
+        _tasks.add(LearningTask(w, QuestionType.enToZh));
+      } else {
+        // 学习模式：全部3种题型
+        _tasks.add(LearningTask(w, QuestionType.zhToEn));
+        _tasks.add(LearningTask(w, QuestionType.enToZh));
+        _tasks.add(LearningTask(w, QuestionType.spelling));
+      }
     }
     // 【核心】彻底打乱任务队列，将复习词、新词、不同题型完全混合！
     _tasks.shuffle(); 
   }
 
+  /// 开始测试模式
+  Future<int> startTestMode() async {
+    _mode = AppMode.test;
+    _testResults = {};
+    testShowAnswer = false;
+    testCorrectAnswer = "";
+    _isLoading = true;
+    notifyListeners();
+    try {
+      _todayWords = await DatabaseHelper.getTodayWords();
+      _currentIndex = 0;
+      // 初始化测试结果
+      for (var w in _todayWords) {
+        _testResults[w.id] = TestWordResult();
+      }
+      if (_todayWords.isNotEmpty) {
+        _buildTasksQueue();
+        await _saveSession();
+        await _generateQuestion();
+      }
+      return _todayWords.length;
+    } catch (e) { return 0; }
+    finally { _isLoading = false; notifyListeners(); }
+  }
+
+  /// 测试完成后，收集错词进入学习模式
+  Future<List<Word>> getTestWrongWords() async {
+    List<Word> wrongWords = [];
+    for (var w in _todayWords) {
+      final r = _testResults[w.id];
+      if (r != null && (r.hasWrong || r.hasDontKnow) && !r.skipped) {
+        wrongWords.add(w);
+      }
+    }
+    return wrongWords;
+  }
+
+  /// 开始学习模式（复习测试中的错词）
+  Future<void> startStudyMode(List<Word> studyWords) async {
+    _mode = AppMode.study;
+    _todayWords = studyWords;
+    _currentIndex = 0;
+    testShowAnswer = false;
+    testCorrectAnswer = "";
+    if (_todayWords.isNotEmpty) {
+      _buildTasksQueue();
+      await _saveSession();
+      await _generateQuestion();
+    }
+    notifyListeners();
+  }
+
   Future<int> loadTodayTasks() async {
+    // 保留原方法：默认为学习模式
+    _mode = AppMode.study;
+    _testResults = {};
     _isLoading = true;
     notifyListeners();
     try {
@@ -917,30 +878,63 @@ class LearningProvider extends ChangeNotifier {
     
     var task = currentTask!;
     var word = task.word;
+    lastUserInput = userInput;
 
     bool isCorrect = task.qType == QuestionType.enToZh
         ? userInput == word.translation
         : userInput.trim().toLowerCase() == word.spelling.toLowerCase();
 
-    if (isCorrect) {
-      _wordStates[word.id]!.remainingTasks--;
-      
-      // 当前单词的所有混合题型已全部答完
-      if (_wordStates[word.id]!.remainingTasks == 0) {
-        int mistakes = _wordStates[word.id]!.mistakes;
-        int quality = 4; // 默认全对
-        if (mistakes == 1) quality = 3;
-        else if (mistakes == 2) quality = 2;
-        else if (mistakes >= 3) quality = 1;
+    if (isTestMode) {
+      // === 测试模式：无AI，显示答案后自动跳转 ===
+      if (isCorrect) {
+        // 答对 → 短促提示后自动下一题
+        testCorrectAnswer = "";
+        testShowAnswer = false;
+        if (_wordStates[word.id]!.remainingTasks > 0) {
+          _wordStates[word.id]!.remainingTasks--;
+        }
+        _nextWord();
+        return null;
+      } else {
+        // 答错 → 记录错误，显示正确答案
+        _wordStates[word.id]!.mistakes++;
+        _testResults[word.id]?.hasWrong = true;
+        final correctAns = task.qType == QuestionType.enToZh
+            ? word.translation : word.spelling;
+        testCorrectAnswer = correctAns;
+        testShowAnswer = true;
+        notifyListeners();
+        // 延迟后自动跳转
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          testShowAnswer = false;
+          testCorrectAnswer = "";
+          _nextWord();
+        });
+        return {};
+      }
+    }
 
-        word.updateSM2(quality);
-        await DatabaseHelper.updateWord(word);
+    // === 学习模式：现有逻辑（含AI） ===
+    if (isCorrect) {
+      if (_wordStates[word.id]!.remainingTasks > 0) {
+        _wordStates[word.id]!.remainingTasks--;
+        
+        if (_wordStates[word.id]!.remainingTasks == 0) {
+          int mistakes = _wordStates[word.id]!.mistakes;
+          int quality = 4;
+          if (mistakes == 1) quality = 3;
+          else if (mistakes == 2) quality = 2;
+          else if (mistakes >= 3) quality = 1;
+
+          word.updateSM2(quality);
+          await DatabaseHelper.updateWord(word);
+        }
       }
       _nextWord();
       return null;
     } else {
-      // 答错记录错误次数，并将这道题【重新塞入队列末尾】逼迫重做
       _wordStates[word.id]!.mistakes++;
+      
       _tasks.add(LearningTask(word, task.qType));
       await _saveSession();
 
@@ -954,11 +948,33 @@ class LearningProvider extends ChangeNotifier {
     }
   }
 
+  /// 测试模式中用户点击「我不会」
+  void dontKnow() {
+    if (currentWord == null || !isTestMode) return;
+    var task = currentTask!;
+    var word = task.word;
+    _testResults[word.id]?.hasDontKnow = true;
+    _wordStates[word.id]!.mistakes++;
+    final correctAns = task.qType == QuestionType.enToZh
+        ? word.translation : word.spelling;
+    testCorrectAnswer = correctAns;
+    testShowAnswer = true;
+    notifyListeners();
+    // 延迟后自动跳转
+    Future.delayed(const Duration(milliseconds: 1500), () {
+      testShowAnswer = false;
+      testCorrectAnswer = "";
+      _nextWord();
+    });
+  }
+
   void _startAiStream(Word word, String userInput, String qType) {
     AiService.getExplanationStream(
       word, userInput, qType,
       (String content) {
-        if (content.contains('"error_analysis": "CONFIG_REQUIRED"')) {
+        // 兼容原有的 error_analysis 与新的 mnemonic 占位符
+        if (content.contains('"error_analysis": "CONFIG_REQUIRED"') || 
+            content.contains('"mnemonic": "CONFIG_REQUIRED"')) {
           aiExplanation = "CONFIG_REQUIRED";
           isAiLoading = false;
         } else {
@@ -967,12 +983,11 @@ class LearningProvider extends ChangeNotifier {
         notifyListeners();
       },
       (String error) {
-        aiExplanation = '{"error_analysis": "网络请求失败，请检查网络或API Key"}';
+        aiExplanation = '{"mnemonic": "网络请求失败，请检查网络或API Key"}';
         isAiLoading = false;
         notifyListeners();
       },
     ).then((_) {
-      // 流结束
       aiFinalJson = aiExplanation;
       isAiLoading = false;
       notifyListeners();
@@ -989,11 +1004,62 @@ class LearningProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 跳过当前题
+  Future<void> skipWord() async {
+    if (currentWord == null) return;
+    var task = currentTask!;
+    if (isTestMode) {
+      // 测试模式：标记为跳过，不放回队列
+      _testResults[task.word.id]?.skipped = true;
+    } else if (isStudyMode) {
+      // 学习模式：跳过即放弃，不放回队列
+      // 不做任何入队操作
+    } else {
+      // 兼容旧逻辑：放回队列末尾
+      _tasks.add(LearningTask(task.word, task.qType));
+    }
+    await _saveSession();
+    _currentIndex++;
+    if (!isFinished) {
+      await _generateQuestion();
+    }
+    notifyListeners();
+  }
+
+  /// "我已经会了" — 跳过当前单词所有题型
+  Future<void> markAsKnown() async {
+    if (currentWord == null) return;
+    var word = currentWord!;
+    // 移除队列中所有该单词的任务
+    _tasks.removeWhere((t) => t.word.id == word.id);
+    // 将该单词标记为已完成
+    _wordStates[word.id]?.remainingTasks = 0;
+    word.updateSM2(5); // 以最高质量标记
+    await DatabaseHelper.updateWord(word);
+    // 如果当前索引已经无效，修正
+    if (_currentIndex >= _tasks.length) {
+      _currentIndex = _tasks.length;
+      await _clearSession();
+      await _markDailyTaskDone();
+    } else {
+      await _saveSession();
+      await _generateQuestion();
+    }
+    notifyListeners();
+  }
+
   void _nextWord() async {
     _currentIndex++;
     if (isFinished) {
       await _clearSession();
-      await _markDailyTaskDone();
+      if (isTestMode) {
+        // 测试完成：检查是否有错词需要进入学习模式
+        // 标记位由 LearningScreen 检测后触发
+      } else if (isStudyMode) {
+        await _markDailyTaskDone();
+      } else {
+        await _markDailyTaskDone();
+      }
     } else {
       await _saveSession();
       await _generateQuestion();
@@ -1039,6 +1105,10 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text("四六级突击"),
         actions: [
+          IconButton(icon: const Icon(Icons.menu_book), onPressed: () =>
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const WordListScreen()))),
+          IconButton(icon: const Icon(Icons.search), onPressed: () =>
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()))),
           IconButton(icon: const Icon(Icons.star_outline), onPressed: () =>
             Navigator.push(context, MaterialPageRoute(builder: (_) => const FavoritesScreen()))),
           IconButton(icon: const Icon(Icons.settings), onPressed: () =>
@@ -1047,36 +1117,31 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(isTodayDone ? Icons.emoji_events : Icons.school,
-              size: 80, color: isTodayDone ? Colors.orange : Colors.indigo),
+          Icon(Icons.quiz, size: 80, color: Colors.indigo),
+          const SizedBox(height: 8),
+          const Text("今日测试", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
           const SizedBox(height: 20),
-
-          if (isTodayDone) ...[
-            const Text("🎉 今日基础任务已达标！",
-                style: TextStyle(fontSize: 20, color: Colors.green, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 20),
-          ],
 
           if (_hasUnfinished)
             _buildButton(Icons.restore, "恢复学习 (继续上次进度)", Colors.blueGrey, () async {
               await context.read<LearningProvider>().continueLearning();
               await Navigator.push(context, MaterialPageRoute(builder: (_) => const LearningScreen()));
               _checkUnfinished();
-            })
-          else if (isTodayDone)
-            _buildButton(Icons.local_fire_department, "继续学习 (超额学习新词)", Colors.deepOrange, () async {
-              await context.read<LearningProvider>().loadTodayTasks();
-              await Navigator.push(context, MaterialPageRoute(builder: (_) => const LearningScreen()));
-              _checkUnfinished();
-            })
-          else
-            _buildButton(Icons.play_arrow, "开始今日任务", Colors.indigo, () async {
-              await context.read<LearningProvider>().loadTodayTasks();
-              await Navigator.push(context, MaterialPageRoute(builder: (_) => const LearningScreen()));
-              _checkUnfinished();
             }),
 
-          const SizedBox(height: 12),
+          _buildButton(Icons.play_arrow, "开始今日测试", Colors.indigo, () async {
+            await context.read<LearningProvider>().startTestMode();
+            await Navigator.push(context, MaterialPageRoute(builder: (_) => const LearningScreen()));
+            _checkUnfinished();
+          }),
+
+          if (isTodayDone) ...[
+            const SizedBox(height: 10),
+            const Text("🎉 今日学习任务已达标！",
+                style: TextStyle(fontSize: 16, color: Colors.green, fontWeight: FontWeight.bold)),
+          ],
+
+          const SizedBox(height: 16),
 
           // 进阶练习入口
           OutlinedButton.icon(
@@ -1262,7 +1327,51 @@ class _LearningScreenState extends State<LearningScreen> {
     ]);
   }
 
+  // 【新增问题2】差异比对富文本生成器
+  List<InlineSpan> _buildComparisonSpans(String input, String correct, QuestionType type) {
+    List<InlineSpan> spans =[];
+    if (type == QuestionType.spelling) {
+      // 拼写题：逐个字母比对，错误标红（带删除线），正确标绿
+      for (int i = 0; i < input.length; i++) {
+        bool isMatch = i < correct.length && input[i].toLowerCase() == correct[i].toLowerCase();
+        spans.add(TextSpan(
+          text: input[i],
+          style: TextStyle(
+            color: isMatch ? Colors.green : Colors.red,
+            fontWeight: FontWeight.bold,
+            decoration: isMatch ? TextDecoration.none : TextDecoration.lineThrough,
+          ),
+        ));
+      }
+    } else {
+      // 单选题：直接划掉错误释义
+      spans.add(TextSpan(
+        text: input.replaceAll(r'\n', ' '), 
+        style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, decoration: TextDecoration.lineThrough)
+      ));
+    }
+    
+    // 中间箭头
+    spans.add(const TextSpan(
+      text: " ➔ ", 
+      style: TextStyle(color: Colors.grey, fontSize: 18, decoration: TextDecoration.none)
+    ));
+    
+    // 正确答案
+    spans.add(TextSpan(
+      text: correct.replaceAll(r'\n', ' '), 
+      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, decoration: TextDecoration.none)
+    ));
+    return spans;
+  }
+
+  // 【修复问题1和问题2】优化底层弹窗交互及标题显示
   void _showAiFeedback(LearningProvider provider) {
+    final currentWord = provider.currentWord!;
+    final qType = provider.currentQType;
+    final lastInput = provider.lastUserInput;
+    final correctWord = qType == QuestionType.enToZh ? currentWord.translation : currentWord.spelling;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1273,22 +1382,30 @@ class _LearningScreenState extends State<LearningScreen> {
         builder: (_, sc) => Padding(
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
           child: Consumer<LearningProvider>(
-            builder: (context, prov, _) => Column(children: [
-              Row(children: [
-                const Icon(Icons.smart_toy, color: Colors.blue),
+            builder: (context, prov, _) => Column(children:[
+              Row(children:[
+                const Icon(Icons.compare_arrows, color: Colors.blueGrey),
                 const SizedBox(width: 8),
-                Text("AI 助教诊断", style: Theme.of(context).textTheme.titleLarge),
-                const Spacer(),
-                // 收藏按钮
-                _FavoriteButton(word: prov.currentWord, aiJson: prov.aiFinalJson),
+                Expanded(
+                  child: RichText(
+                    text: TextSpan(
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(fontSize: 18),
+                      children: _buildComparisonSpans(lastInput, correctWord, qType),
+                    ),
+                  ),
+                ),
+                _FavoriteButton(word: currentWord, aiJson: prov.aiFinalJson),
               ]),
               const Divider(),
               Expanded(child: SingleChildScrollView(controller: sc, child: _buildAiContent(prov))),
               const SizedBox(height: 10),
-              Row(children: [
+              Row(children:[
                 Expanded(child: ElevatedButton(
-                  onPressed: prov.isAiLoading ? null : () { Navigator.pop(ctx); prov.proceedToNext(); },
-                  child: const Text("记住了，下一个"),
+                  onPressed: prov.isAiLoading ? null : () { 
+                    Navigator.pop(ctx);
+                    // "我知道了" — 仅关闭弹窗，不自动切换下一题
+                  },
+                  child: const Text("我知道了"),
                 )),
                 const SizedBox(width: 10),
                 ElevatedButton.icon(
@@ -1296,7 +1413,7 @@ class _LearningScreenState extends State<LearningScreen> {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
                   onPressed: prov.isAiLoading ? null : () {
                     Navigator.pop(ctx);
-                    _showDetailedExplanation(prov.currentWord!);
+                    _showDetailedExplanation(currentWord);
                   },
                 ),
               ]),
@@ -1305,7 +1422,9 @@ class _LearningScreenState extends State<LearningScreen> {
           ),
         ),
       ),
-    );
+    ).then((_) {
+      // 【修改】不再自动推进到下一题，用户需手动点击"下一题"或"跳过"等按钮
+    });
   }
 
   void _showDetailedExplanation(Word word) async {
@@ -1354,8 +1473,110 @@ class _LearningScreenState extends State<LearningScreen> {
             ))),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.compare_arrows, size: 18),
+                    label: const Text("同义词 / 反义词"),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.indigo,
+                      side: const BorderSide(color: Colors.indigo),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showSynonymsDialog(word);
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text("关闭"),
+                  ),
+                ),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  void _showSynonymsDialog(Word word) async {
+    showDialog(context: context, barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()));
+
+    final data = await AiService.getSynonyms(word);
+
+    if (!mounted) return;
+    Navigator.pop(context); // 关掉加载弹窗
+
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.55, minChildSize: 0.35, maxChildSize: 0.85, expand: false,
+        builder: (_, sc) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Column(children: [
+            Row(children: [
+              const Icon(Icons.compare_arrows, color: Colors.indigo),
+              const SizedBox(width: 8),
+              Expanded(child: Text("同义词 / 反义词：${word.spelling}",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  overflow: TextOverflow.ellipsis)),
+            ]),
+            const Divider(),
+            Expanded(child: SingleChildScrollView(
+              controller: sc,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("📖 同义词 / 近义词",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.green.withOpacity(0.2)),
+                  ),
+                  child: Text(data['synonyms'] ?? '暂无数据',
+                      style: const TextStyle(fontSize: 14, height: 1.6)),
+                ),
+                const SizedBox(height: 24),
+                const Text("🔄 反义词",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.withOpacity(0.2)),
+                  ),
+                  child: Text(data['antonyms'] ?? '暂无数据',
+                      style: const TextStyle(fontSize: 14, height: 1.6)),
+                ),
+                const SizedBox(height: 20),
+              ]),
+            )),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
               child: SizedBox(width: double.infinity, child: ElevatedButton(
-                onPressed: () => Navigator.pop(ctx), child: const Text("关闭"),
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo, foregroundColor: Colors.white,
+                ),
+                child: const Text("关闭"),
               )),
             ),
           ]),
@@ -1404,125 +1625,322 @@ class _LearningScreenState extends State<LearningScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text("学习中")),
-      body: Consumer<LearningProvider>(
-        builder: (context, provider, child) {
-          if (provider.isLoading) return const Center(child: CircularProgressIndicator());
-
-          if (provider.isFinished) {
-            return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const Text("🎉 恭喜！这一组单词已完成",
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 30),
-              ElevatedButton.icon(
-                icon: const Icon(Icons.local_fire_department), label: const Text("继续学习 (再来一组)"),
-                style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                    backgroundColor: Colors.deepOrange, foregroundColor: Colors.white),
-                onPressed: () async {
-                  int count = await provider.loadTodayTasks();
-                  if (count == 0 && mounted) {
-                    showDialog(context: context, builder: (ctx) => AlertDialog(
-                      title: const Text("没有新词啦"),
-                      content: const Text("今天到期的复习任务已全部完成。"),
-                      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("好的"))],
-                    ));
-                  }
-                },
-              ),
-              const SizedBox(height: 15),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.home), label: const Text("返回主页"),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ]));
-          }
-
-          final word = provider.currentWord!;
-          final questionText = (provider.currentQType == QuestionType.enToZh
-              ? word.spelling : word.translation).replaceAll(r'\n', '\n');
-
-          return SafeArea(
-            child: Focus( // 【新增】外层包裹 Focus 用于监听键盘
-              autofocus: true,
-              onKeyEvent: (node, event) {
-                // 当按下按键，且当前不是拼写题时触发快捷键
-                if (event is KeyDownEvent && provider.currentQType != QuestionType.spelling) {
-                  final key = event.logicalKey.keyLabel;
-                  if (['1', '2', '3', '4'].contains(key)) {
-                    final index = int.parse(key) - 1;
-                    if (index < provider.options.length) {
-                      _handleAnswer(provider.options[index]);
-                      return KeyEventResult.handled;
-                    }
-                  }
-                }
-                return KeyEventResult.ignored;
-              },
-              child: Column(children: [
-                LinearProgressIndicator(
-                  value: provider.totalWords > 0 ? provider.progress / provider.totalWords : 0,
-                  minHeight: 4,
+    return Consumer<LearningProvider>(
+      builder: (context, provider, child) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(provider.isTestMode ? "测试模式" : "学习模式"),
+            actions: [
+              if (provider.canGoPrevious && !provider.isLoading && !provider.isFinished && provider.isStudyMode)
+                TextButton.icon(
+                  icon: const Icon(Icons.undo, size: 18),
+                  label: const Text("上一题"),
+                  onPressed: () => provider.goPrevious(),
                 ),
-                Expanded(child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Text('掌握进度：${provider.progress} / ${provider.totalWords} (包含额外复习)',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                    const SizedBox(height: 28),
+            ],
+          ),
+          body: Builder(
+            builder: (context) {
+              if (provider.isLoading) return const Center(child: CircularProgressIndicator());
 
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 250),
-                      child: Text(questionText,
-                        key: ValueKey('${word.id}_${provider.currentQType}'),
-                        style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, height: 1.5),
-                        textAlign: TextAlign.center),
+              if (provider.isFinished) {
+                return _buildFinishedView(provider);
+              }
+
+              final word = provider.currentWord!;
+              final questionText = (provider.currentQType == QuestionType.enToZh
+                  ? word.spelling : word.translation).replaceAll(r'\n', '\n');
+
+              return SafeArea(
+                child: Focus(
+                  autofocus: true,
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent && provider.currentQType != QuestionType.spelling) {
+                      final key = event.logicalKey.keyLabel;
+                      if (['1', '2', '3', '4'].contains(key)) {
+                        final index = int.parse(key) - 1;
+                        if (index < provider.options.length) {
+                          _handleAnswer(provider.options[index]);
+                          return KeyEventResult.handled;
+                        }
+                      }
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Column(children: [
+                    LinearProgressIndicator(
+                      value: provider.totalWords > 0 ? provider.progress / provider.totalWords : 0,
+                      minHeight: 4,
                     ),
-                    const SizedBox(height: 36),
+                    Expanded(child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        // 进度文字
+                        Text(
+                          provider.isTestMode
+                              ? '测试进度：${provider.progress} / ${provider.totalWords}'
+                              : '学习进度：${provider.progress} / ${provider.totalWords}',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: Colors.grey, fontSize: 13)),
+                        const SizedBox(height: 28),
 
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 200),
-                      child: provider.currentQType == QuestionType.spelling
-                        ? Column(key: ValueKey('spell_${word.id}'), children: [
-                            TextField(
-                              controller: _spellController, autofocus: true,
-                              decoration: const InputDecoration(
-                                  border: OutlineInputBorder(), labelText: "请输入对应的英文单词"),
-                              onSubmitted: _handleAnswer,
-                            ),
-                            const SizedBox(height: 14),
-                            SizedBox(width: double.infinity, child: ElevatedButton(
-                              onPressed: () => _handleAnswer(_spellController.text),
-                              child: const Text("提交"),
-                            )),
-                          ])
-                        : Column(
-                            key: ValueKey('options_${word.id}_${provider.options.hashCode}'),
-                            children: provider.options.map((opt) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.all(16),
-                                  ),
-                                  onPressed: () => _handleAnswer(opt),
-                                  child: Text(opt.replaceAll(r'\n', '\n'),
-                                      style: const TextStyle(fontSize: 15), textAlign: TextAlign.center),
-                                ),
+                        // 问题文本
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 250),
+                          child: Text(questionText,
+                            key: ValueKey('${word.id}_${provider.currentQType}'),
+                            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold, height: 1.5),
+                            textAlign: TextAlign.center),
+                        ),
+                        const SizedBox(height: 36),
+
+                        // 答题区域
+                        _buildAnswerArea(provider, word),
+
+                        // 测试模式正确答案提示
+                        if (provider.isTestMode && provider.testShowAnswer)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.orange.withOpacity(0.4)),
                               ),
-                            )).toList(),
+                              child: Column(children: [
+                                const Text("正确答案：",
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange, fontSize: 14)),
+                                const SizedBox(height: 6),
+                                Text(provider.testCorrectAnswer,
+                                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.green)),
+                              ]),
+                            ),
                           ),
-                    ),
+
+                        // 操作按钮（仅学习模式显示）
+                        if (provider.isStudyMode) ...[
+                          const SizedBox(height: 20),
+                          Row(children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.skip_next, size: 18),
+                                label: const Text("跳过"),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.orange,
+                                  side: const BorderSide(color: Colors.orange),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                                onPressed: () async {
+                                  await provider.skipWord();
+                                  _spellController.clear();
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                icon: const Icon(Icons.check_circle_outline, size: 18),
+                                label: const Text("我已经会了"),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.green,
+                                  side: const BorderSide(color: Colors.green),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                                onPressed: () async {
+                                  await provider.markAsKnown();
+                                  _spellController.clear();
+                                },
+                              ),
+                            ),
+                          ]),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              icon: const Icon(Icons.arrow_forward, size: 18),
+                              label: const Text("下一题"),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.indigo,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 14),
+                              ),
+                              onPressed: () {
+                                provider.proceedToNext();
+                                _spellController.clear();
+                              },
+                            ),
+                          ),
+                        ],
+                      ]),
+                    )),
                   ]),
-                )),
-              ]),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  /// 测试/学习完成时的视图
+  Widget _buildFinishedView(LearningProvider provider) {
+    if (provider.isTestMode) {
+      // 测试完成：显示结果 + 进入学习模式的入口
+      final results = provider.testResults;
+      int total = results.length;
+      int correct = 0;
+      int wrong = 0;
+      int dontKnow = 0;
+      int skipped = 0;
+      results.forEach((id, r) {
+        if (r.skipped) skipped++;
+        else if (r.hasDontKnow) dontKnow++;
+        else if (r.hasWrong) wrong++;
+        else correct++;
+      });
+
+      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        const Icon(Icons.assignment_turned_in, size: 64, color: Colors.indigo),
+        const SizedBox(height: 16),
+        const Text("📋 测试完成！", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 20),
+        Text("共 $total 个单词", style: const TextStyle(fontSize: 16)),
+        const SizedBox(height: 8),
+        Text("✅ 全对：$correct", style: const TextStyle(fontSize: 15, color: Colors.green)),
+        Text("❌ 答错：$wrong", style: const TextStyle(fontSize: 15, color: Colors.red)),
+        Text("🤷 不会：$dontKnow", style: const TextStyle(fontSize: 15, color: Colors.orange)),
+        Text("⏭ 跳过：$skipped", style: const TextStyle(fontSize: 15, color: Colors.grey)),
+        const SizedBox(height: 30),
+        if (wrong + dontKnow > 0)
+          ElevatedButton.icon(
+            icon: const Icon(Icons.replay),
+            label: Text("进入学习模式 (复习 ${wrong + dontKnow} 个单词)"),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
+              backgroundColor: Colors.deepOrange, foregroundColor: Colors.white,
             ),
-          );
-        },
+            onPressed: () async {
+              final wrongWords = await provider.getTestWrongWords();
+              if (wrongWords.isNotEmpty) {
+                await provider.startStudyMode(wrongWords);
+              }
+            },
+          ),
+        const SizedBox(height: 12),
+        if (wrong + dontKnow == 0)
+          ElevatedButton.icon(
+            icon: const Icon(Icons.celebration),
+            label: const Text("全部正确！返回主页"),
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 14),
+              backgroundColor: Colors.green, foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+        const SizedBox(height: 12),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.home),
+          label: const Text("返回主页"),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ]));
+    }
+
+    // 学习模式完成
+    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      const Text("🎉 学习完成！",
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+      const SizedBox(height: 30),
+      ElevatedButton.icon(
+        icon: const Icon(Icons.home),
+        label: const Text("返回主页"),
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+          backgroundColor: Colors.indigo, foregroundColor: Colors.white,
+        ),
+        onPressed: () => Navigator.pop(context),
       ),
+    ]));
+  }
+
+  /// 构建答题区域（测试模式隐藏拼写，学习模式显示全部）
+  Widget _buildAnswerArea(LearningProvider provider, Word word) {
+    if (provider.isTestMode) {
+      // 测试模式：仅选择题
+      return Column(
+        key: ValueKey('options_${word.id}_${provider.options.hashCode}'),
+        children: [
+          ...provider.options.map((opt) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.all(16),
+                ),
+                onPressed: () => _handleAnswer(opt),
+                child: Text(opt.replaceAll(r'\n', '\n'),
+                    style: const TextStyle(fontSize: 15), textAlign: TextAlign.center),
+              ),
+            ),
+          )).toList(),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.help_outline, size: 20),
+              label: const Text("我不会", style: TextStyle(fontSize: 16)),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.grey,
+                side: const BorderSide(color: Colors.grey),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                backgroundColor: Colors.grey.withOpacity(0.05),
+              ),
+              onPressed: () => provider.dontKnow(),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // 学习模式：选择题 + 拼写题
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 200),
+      child: provider.currentQType == QuestionType.spelling
+        ? Column(key: ValueKey('spell_${word.id}'), children: [
+            TextField(
+              controller: _spellController, autofocus: true,
+              decoration: const InputDecoration(
+                  border: OutlineInputBorder(), labelText: "请输入对应的英文单词"),
+              onSubmitted: _handleAnswer,
+            ),
+            const SizedBox(height: 14),
+            SizedBox(width: double.infinity, child: ElevatedButton(
+              onPressed: () => _handleAnswer(_spellController.text),
+              child: const Text("提交"),
+            )),
+          ])
+        : Column(
+            key: ValueKey('options_${word.id}_${provider.options.hashCode}'),
+            children: provider.options.map((opt) => Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.all(16),
+                  ),
+                  onPressed: () => _handleAnswer(opt),
+                  child: Text(opt.replaceAll(r'\n', '\n'),
+                      style: const TextStyle(fontSize: 15), textAlign: TextAlign.center),
+                ),
+              ),
+            )).toList(),
+          ),
     );
   }
 }
@@ -1703,12 +2121,10 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
             Expanded(child: SingleChildScrollView(controller: sc, child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if ((data['error_analysis'] ?? '').toString().isNotEmpty)
-                  _favSection("错误分析", data['error_analysis'].toString(), Colors.blueGrey),
-                if ((data['etymology'] ?? '').toString().isNotEmpty)
-                  _favSection("词源词根", data['etymology'].toString(), Colors.indigo),
                 if ((data['mnemonic'] ?? '').toString().isNotEmpty)
                   _favSection("记忆法", data['mnemonic'].toString(), Colors.orange),
+                if ((data['etymology'] ?? '').toString().isNotEmpty)
+                  _favSection("单词说明", data['etymology'].toString(), Colors.indigo),
                 if ((data['example'] ?? '').toString().isNotEmpty)
                   _favSection("例句", data['example'].toString().replaceAll(r'\n', '\n'), Colors.teal),
                 const SizedBox(height: 10),
@@ -2063,7 +2479,541 @@ class _AdvancedPracticeScreenState extends State<AdvancedPracticeScreen> {
 }
 
 // ==========================================
-// 设置页
+// 单词表页（查看与手动编辑单词状态）
+// ==========================================
+class WordListScreen extends StatefulWidget {
+  const WordListScreen({super.key});
+  @override
+  State<WordListScreen> createState() => _WordListScreenState();
+}
+
+class _WordListScreenState extends State<WordListScreen> {
+  List<Word> _allWords = [];
+  List<Word> _filteredWords = [];
+  bool _loading = true;
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() { super.initState(); _loadWords(); }
+
+  @override
+  void dispose() { _searchController.dispose(); super.dispose(); }
+
+  Future<void> _loadWords() async {
+    setState(() => _loading = true);
+    try {
+      // 从数据库获取所有单词
+      final db = await DatabaseHelper.database;
+      final maps = await db.query('words', orderBy: 'spelling ASC', limit: 500);
+      _allWords = maps.map((m) => Word.fromMap(m)).toList();
+      _filteredWords = List.from(_allWords);
+    } catch (e) { debugPrint("加载单词表失败: $e"); }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  void _filter(String query) {
+    setState(() {
+      if (query.isEmpty) {
+        _filteredWords = List.from(_allWords);
+      } else {
+        final q = query.toLowerCase();
+        _filteredWords = _allWords.where((w) =>
+          w.spelling.toLowerCase().contains(q) ||
+          w.translation.toLowerCase().contains(q)
+        ).toList();
+      }
+    });
+  }
+
+  String _wordStatus(Word w) {
+    if (w.nextReviewDate == -1) return '已掌握';
+    if (w.nextReviewDate == 0) return '新词';
+    if (w.nextReviewDate <= DateTime.now().millisecondsSinceEpoch) return '待复习';
+    return '学习中';
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case '已掌握': return Colors.green;
+      case '新词': return Colors.blue;
+      case '待复习': return Colors.orange;
+      default: return Colors.grey;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("单词表")),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: "筛选单词...",
+              prefixIcon: const Icon(Icons.filter_list),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              suffixIcon: _searchController.text.isNotEmpty
+                ? IconButton(icon: const Icon(Icons.clear), onPressed: () {
+                    _searchController.clear();
+                    _filter('');
+                  })
+                : null,
+            ),
+            onChanged: _filter,
+          ),
+        ),
+        if (_loading)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else
+          Expanded(
+            child: ListView.builder(
+              itemCount: _filteredWords.length,
+              itemBuilder: (context, i) {
+                final w = _filteredWords[i];
+                final status = _wordStatus(w);
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+                  child: ListTile(
+                    title: Text(w.spelling,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    subtitle: Text(w.translation.replaceAll(r'\n', '\n'),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                    trailing: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _statusColor(status).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(status,
+                          style: TextStyle(
+                            color: _statusColor(status),
+                            fontSize: 12, fontWeight: FontWeight.bold)),
+                    ),
+                    onTap: () => _editWord(w),
+                  ),
+                );
+              },
+            ),
+          ),
+      ]),
+    );
+  }
+
+  void _editWord(Word word) {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => _WordEditSheet(
+        word: word,
+        onSaved: () {
+          Navigator.pop(ctx);
+          _loadWords(); // 刷新列表
+        },
+      ),
+    );
+  }
+}
+
+/// 单词编辑 BottomSheet
+class _WordEditSheet extends StatefulWidget {
+  final Word word;
+  final VoidCallback onSaved;
+
+  const _WordEditSheet({required this.word, required this.onSaved});
+
+  @override
+  State<_WordEditSheet> createState() => _WordEditSheetState();
+}
+
+class _WordEditSheetState extends State<_WordEditSheet> {
+  late TextEditingController _repsController;
+  late TextEditingController _intervalController;
+  late double _easeFactor;
+  late bool _isMastered;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _repsController = TextEditingController(text: widget.word.reps.toString());
+    _intervalController = TextEditingController(text: widget.word.interval.toString());
+    _easeFactor = widget.word.easeFactor;
+    _isMastered = widget.word.nextReviewDate == -1;
+  }
+
+  @override
+  void dispose() {
+    _repsController.dispose();
+    _intervalController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final word = widget.word;
+    word.reps = int.tryParse(_repsController.text) ?? word.reps;
+    word.interval = int.tryParse(_intervalController.text) ?? word.interval;
+    word.easeFactor = _easeFactor;
+    word.nextReviewDate = _isMastered ? -1 : DateTime.now().millisecondsSinceEpoch;
+    await DatabaseHelper.updateWord(word);
+    if (mounted) {
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("✅ 已保存"), backgroundColor: Colors.green));
+      widget.onSaved();
+    }
+  }
+
+  Future<void> _reset() async {
+    final word = widget.word;
+    word.reps = 0;
+    word.interval = 0;
+    word.easeFactor = 2.5;
+    word.nextReviewDate = 0;
+    await DatabaseHelper.updateWord(word);
+    if (mounted) {
+      setState(() {
+        _repsController.text = '0';
+        _intervalController.text = '0';
+        _easeFactor = 2.5;
+        _isMastered = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("🔄 已重置为未学习状态"), backgroundColor: Colors.blue));
+      widget.onSaved();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [
+          const Icon(Icons.edit, color: Colors.indigo),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text("编辑：${widget.word.spelling}",
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          ),
+        ]),
+        const Divider(),
+        // 单词信息（只读）
+        Text("释义：${widget.word.translation}", style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        const SizedBox(height: 16),
+
+        // 编辑字段
+        TextField(
+          controller: _repsController,
+          decoration: const InputDecoration(labelText: "复习次数 (reps)", border: OutlineInputBorder()),
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _intervalController,
+          decoration: const InputDecoration(labelText: "复习间隔 (interval, 天)", border: OutlineInputBorder()),
+          keyboardType: TextInputType.number,
+        ),
+        const SizedBox(height: 12),
+        Row(children: [
+          const Text("难度系数 (easeFactor)：" , style: TextStyle(fontSize: 14)),
+          const SizedBox(width: 8),
+          Text(_easeFactor.toStringAsFixed(2),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        ]),
+        Slider(
+          value: _easeFactor,
+          min: 1.3,
+          max: 3.0,
+          divisions: 34,
+          label: _easeFactor.toStringAsFixed(2),
+          onChanged: (v) => setState(() => _easeFactor = v),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile(
+          title: const Text("已掌握"),
+          subtitle: const Text("开启后此单词不再出现在复习中"),
+          value: _isMastered,
+          onChanged: (v) => setState(() => _isMastered = v),
+          contentPadding: EdgeInsets.zero,
+        ),
+        const SizedBox(height: 16),
+
+        // 操作按钮
+        Row(children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              icon: const Icon(Icons.restart_alt, size: 18),
+              label: const Text("重置"),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.red,
+                side: const BorderSide(color: Colors.red),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _reset,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              icon: _saving
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.save),
+              label: const Text("保存"),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.indigo,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              onPressed: _saving ? null : _save,
+            ),
+          ),
+        ]),
+        const SizedBox(height: 10),
+      ]),
+    );
+  }
+}
+
+// ==========================================
+// 搜索页
+// ==========================================
+class SearchScreen extends StatefulWidget {
+  const SearchScreen({super.key});
+  @override
+  State<SearchScreen> createState() => _SearchScreenState();
+}
+
+class _SearchScreenState extends State<SearchScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  List<Word> _results = [];
+  bool _isSearching = false;
+  bool _hasSearched = false;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search() async {
+    final query = _searchController.text.trim();
+    if (query.isEmpty) return;
+    setState(() { _isSearching = true; _hasSearched = true; });
+    final results = await DatabaseHelper.searchWords(query);
+    if (mounted) setState(() { _results = results; _isSearching = false; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text("搜索单词")),
+      body: Column(children: [
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: TextField(
+            controller: _searchController,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: "输入单词拼写或中文释义...",
+              prefixIcon: const Icon(Icons.search),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              suffixIcon: _searchController.text.isNotEmpty
+                ? IconButton(icon: const Icon(Icons.clear), onPressed: () {
+                    _searchController.clear();
+                    setState(() { _results = []; _hasSearched = false; });
+                  })
+                : null,
+            ),
+            onSubmitted: (_) => _search(),
+          ),
+        ),
+        if (_isSearching)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(40),
+            child: CircularProgressIndicator(),
+          ))
+        else if (_hasSearched && _results.isEmpty)
+          const Expanded(child: Center(
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.search_off, size: 64, color: Colors.grey),
+              SizedBox(height: 16),
+              Text("未找到匹配的单词", style: TextStyle(color: Colors.grey, fontSize: 16)),
+            ]),
+          ))
+        else
+          Expanded(
+            child: ListView.builder(
+              itemCount: _results.length,
+              itemBuilder: (context, i) {
+                final word = _results[i];
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: ListTile(
+                    title: Text(word.spelling,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    subtitle: Text(word.translation.replaceAll(r'\n', '\n'),
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                      TextButton.icon(
+                        icon: const Icon(Icons.compare_arrows, size: 16),
+                        label: const Text("同义词"),
+                        style: TextButton.styleFrom(foregroundColor: Colors.indigo),
+                        onPressed: () => _showSynonyms(word),
+                      ),
+                    ]),
+                    onTap: () => _showWordDetail(word),
+                  ),
+                );
+              },
+            ),
+          ),
+      ]),
+    );
+  }
+
+  void _showWordDetail(Word word) {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5, minChildSize: 0.3, maxChildSize: 0.85, expand: false,
+        builder: (_, sc) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Column(children: [
+            Row(children: [
+              const Icon(Icons.menu_book, color: Colors.indigo),
+              const SizedBox(width: 8),
+              Expanded(child: Text("${word.spelling} — ${word.translation}",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  overflow: TextOverflow.ellipsis)),
+            ]),
+            const Divider(),
+            Expanded(child: SingleChildScrollView(
+              controller: sc,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _buildInfoRow("拼写", word.spelling),
+                _buildInfoRow("释义", word.translation),
+                _buildInfoRow("复习次数", "${word.reps}"),
+                _buildInfoRow("SM2难度", word.easeFactor.toStringAsFixed(2)),
+                _buildInfoRow("掌握状态",
+                    word.nextReviewDate == -1 ? "✅ 已掌握" : "学习中"),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.compare_arrows),
+                    label: const Text("查看同义词 / 反义词"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _showSynonyms(word);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ]),
+            )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width: 80, child: Text("$label：",
+          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
+      Expanded(child: Text(value, style: const TextStyle(fontSize: 15))),
+    ]),
+  );
+
+  void _showSynonyms(Word word) async {
+    showDialog(context: context, barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()));
+
+    final data = await AiService.getSynonyms(word);
+
+    if (!mounted) return;
+    Navigator.pop(context); // 关掉加载弹窗
+
+    showModalBottomSheet(
+      context: context, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.55, minChildSize: 0.35, maxChildSize: 0.85, expand: false,
+        builder: (_, sc) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Column(children: [
+            Row(children: [
+              const Icon(Icons.compare_arrows, color: Colors.indigo),
+              const SizedBox(width: 8),
+              Expanded(child: Text("同义词 / 反义词：${word.spelling}",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                  overflow: TextOverflow.ellipsis)),
+            ]),
+            const Divider(),
+            Expanded(child: SingleChildScrollView(
+              controller: sc,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text("📖 同义词 / 近义词",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.green.withOpacity(0.2)),
+                  ),
+                  child: Text(data['synonyms'] ?? '暂无数据',
+                      style: const TextStyle(fontSize: 14, height: 1.6)),
+                ),
+                const SizedBox(height: 24),
+                const Text("🔄 反义词",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withOpacity(0.07),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.withOpacity(0.2)),
+                  ),
+                  child: Text(data['antonyms'] ?? '暂无数据',
+                      style: const TextStyle(fontSize: 14, height: 1.6)),
+                ),
+                const SizedBox(height: 20),
+              ]),
+            )),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: SizedBox(width: double.infinity, child: ElevatedButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo, foregroundColor: Colors.white,
+                ),
+                child: const Text("关闭"),
+              )),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ==========================================
+// 设置页 (简化版，仅保留DeepSeek API配置)
 // ==========================================
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -2080,7 +3030,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() { super.initState(); _loadKey(); }
 
   Future<void> _loadKey() async {
-    final key = await UnifiedAiService.getApiKey();
+    final key = await AiService.getApiKey();
     if (mounted) { _keyController.text = key; setState(() => _isLoading = false); }
   }
 
@@ -2090,7 +3040,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     setState(() => _isLoading = true);
-    await UnifiedAiService.saveApiKey(_keyController.text.trim());
+    await AiService.saveApiKey(_keyController.text.trim());
     if (mounted) {
       setState(() { _isLoading = false; _isSaved = true; });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2159,269 +3109,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
 
         const Divider(height: 40),
-        
-        // AI服务选择器
-        const Text("AI 服务配置",
+
+        // DeepSeek API配置
+        const Text("DeepSeek API 配置",
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
         const SizedBox(height: 10),
-        
-        // AI服务类型选择
-        FutureBuilder<Map<String, dynamic>>(
-          future: AIServiceManager.getCurrentServiceStatus(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            
-            final status = snapshot.data!;
-            final isConfigured = status['isConfigured'] as bool;
-            final serviceName = status['name'] as String;
-            final serviceDesc = status['description'] as String;
-            final statusText = status['status'] as String;
-            final statusColor = status['statusColor'] as String;
-            
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              isConfigured ? Icons.check_circle : Icons.warning,
-                              color: isConfigured ? Colors.green : Colors.orange,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    "当前服务: $serviceName",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  Text(
-                                    serviceDesc,
-                                    style: const TextStyle(
-                                      color: Colors.grey,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: statusColor == 'green' 
-                                    ? Colors.green.shade100 
-                                    : Colors.red.shade100,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                statusText,
-                                style: TextStyle(
-                                  color: statusColor == 'green' 
-                                      ? Colors.green.shade800 
-                                      : Colors.red.shade800,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                icon: const Icon(Icons.swap_horiz),
-                                label: const Text("切换服务"),
-                                onPressed: () async {
-                                  final newType = await AIServiceManager.toggleService();
-                                  setState(() {});
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text("已切换到 ${newType.name}"),
-                                      backgroundColor: Colors.blue,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            if (status['type'] == AIServiceType.lmStudio)
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.settings),
-                                  label: const Text("LM-Studio设置"),
-                                  onPressed: () {
-                                    showLMStudioSettings(context);
-                                  },
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.refresh, size: 16),
-                          label: const Text("刷新状态"),
-                          onPressed: () {
-                            setState(() {});
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text("状态已刷新"),
-                                duration: Duration(seconds: 1),
-                              ),
-                            );
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            );
-          },
+        const Text("密钥将加密存储在本地设备，不会上传到任何第三方服务器。",
+            style: TextStyle(color: Colors.grey, fontSize: 13)),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _keyController, obscureText: true,
+          decoration: const InputDecoration(
+              labelText: "API Key", border: OutlineInputBorder(),
+              prefixIcon: Icon(Icons.key), hintText: "sk-..."),
         ),
-        
-        // DeepSeek API配置（仅在DeepSeek时显示）
-        FutureBuilder<AIServiceType>(
-          future: AIServiceManager.getCurrentServiceType(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const SizedBox();
-            }
-            
-            final serviceType = snapshot.data!;
-            if (serviceType != AIServiceType.deepseek) {
-              return const SizedBox();
-            }
-            
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("DeepSeek API 配置",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
-                const SizedBox(height: 10),
-                const Text("密钥将加密存储在本地设备，不会上传到任何第三方服务器。",
-                    style: TextStyle(color: Colors.grey, fontSize: 13)),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: _keyController, obscureText: true,
-                  decoration: const InputDecoration(
-                      labelText: "API Key", border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.key), hintText: "sk-..."),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _saveKey,
-                  style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.all(15),
-                      backgroundColor: _isSaved ? Colors.green : Colors.indigo,
-                      foregroundColor: Colors.white),
-                  child: _isLoading
-                      ? const SizedBox(height: 20, width: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text(_isSaved ? "保存成功" : "保存配置"),
-                ),
-                if (_keyController.text.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      label: const Text("清除已保存的 Key", style: TextStyle(color: Colors.red)),
-                      onPressed: () async {
-                        await UnifiedAiService.deleteApiKey();
-                        _keyController.clear();
-                        setState(() {});
-                        if (context.mounted)
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已清除 Key")));
-                      },
-                    ),
-                  ),
-                const SizedBox(height: 20),
-              ],
-            );
-          },
+        const SizedBox(height: 20),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _saveKey,
+          style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.all(15),
+              backgroundColor: _isSaved ? Colors.green : Colors.indigo,
+              foregroundColor: Colors.white),
+          child: _isLoading
+              ? const SizedBox(height: 20, width: 20,
+                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : Text(_isSaved ? "保存成功" : "保存配置"),
         ),
-        
-        // LM-Studio配置说明
-        FutureBuilder<AIServiceType>(
-          future: AIServiceManager.getCurrentServiceType(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const SizedBox();
-            }
-            
-            final serviceType = snapshot.data!;
-            if (serviceType != AIServiceType.lmStudio) {
-              return const SizedBox();
-            }
-            
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("LM-Studio 配置",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo)),
-                const SizedBox(height: 10),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          "使用说明：",
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "1. 下载并安装 LM-Studio (https://lmstudio.ai/)",
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        const Text(
-                          "2. 启动 LM-Studio 并加载模型",
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        const Text(
-                          "3. 在 LM-Studio 中启动本地服务器",
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        const Text(
-                          "4. 点击上面的'LM-Studio设置'配置连接",
-                          style: TextStyle(fontSize: 14),
-                        ),
-                        const SizedBox(height: 12),
-                        ElevatedButton.icon(
-                          icon: const Icon(Icons.settings),
-                          label: const Text("打开LM-Studio设置"),
-                          onPressed: () {
-                            showLMStudioSettings(context);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.deepPurple,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-            );
-          },
-        ),
+        if (_keyController.text.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: TextButton.icon(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              label: const Text("清除已保存的 Key", style: TextStyle(color: Colors.red)),
+              onPressed: () async {
+                await AiService.deleteApiKey();
+                _keyController.clear();
+                setState(() {});
+                if (context.mounted)
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("已清除 Key")));
+              },
+            ),
+          ),
+        const SizedBox(height: 20),
       ]),
     );
   }
